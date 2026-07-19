@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthed() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isAuthed() && request.auth.uid == uid;
+    }
+    // Field-level validation: positive int, etc.
+    function isPositiveInt(x) {
+      return x is int && x > 0;
+    }
+
+    // --- Users ---
+    match /users/{uid} {
+      allow read, update, delete: if isOwner(uid);
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasAll(['displayName'])
+        && request.resource.data.displayName is string
+        && request.resource.data.householdSize is int
+        && request.resource.data.householdSize >= 1;
+      // No client may flip owner-related fields.
+      allow update: if isOwner(uid)
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'displayName', 'householdSize', 'defaultServings', 'defaultPlanLength',
+          'maxTotalTimeMinutes', 'dietaryPattern', 'allergens',
+          'excludedIngredients', 'favoriteCuisines', 'dislikedCuisines',
+          'preferredProteins', 'availableEquipment', 'skillLevel',
+          'budgetPreference', 'leftoverPreference', 'measurementSystem',
+          'timezone', 'onboardingCompleted', 'updatedAt'
+        ]);
+    }
+
+    // --- Meal Plans ---
+    match /mealPlans/{planId} {
+      allow read: if isOwner(resource.data.ownerId);
+      allow create: if isAuthed()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.status in ['draft', 'generating', 'ready', 'failed', 'archived']
+        && isPositiveInt(request.resource.data.planLength)
+        && request.resource.data.planLength <= 7
+        && request.resource.data.promptVersion is string
+        && request.resource.data.modelName is string;
+      allow update: if isOwner(resource.data.ownerId)
+        && request.resource.data.ownerId == resource.data.ownerId // immutable owner
+        && request.resource.data.promptVersion == resource.data.promptVersion // immutable prompt version
+        && request.resource.data.modelName == resource.data.modelName; // immutable model
+      allow delete: if isOwner(resource.data.ownerId);
+
+      // --- Recipes subcollection ---
+      match /recipes/{recipeId} {
+        allow read: if isOwner(get(/databases/$(database)/documents/mealPlans/$(planId)).data.ownerId);
+        allow create, update, delete: if isOwner(get(/databases/$(database)/documents/mealPlans/$(planId)).data.ownerId)
+          && request.resource.data.ownerId == request.auth.uid;
+      }
+
+      // --- ShoppingItems subcollection ---
+      match /shoppingItems/{itemId} {
+        allow read: if isOwner(get(/databases/$(database)/documents/mealPlans/$(planId)).data.ownerId);
+        allow create, update, delete: if isOwner(get(/databases/$(database)/documents/mealPlans/$(planId)).data.ownerId);
+      }
+    }
+
+    // --- Public shares ---
+    match /publicShares/{shareId} {
+      // Single-share get only. No list, no random reads.
+      allow get: if resource.data.isActive == true
+        && resource.data.expiresAt > request.time
+        && resource.data.revokedAt == null;
+      allow list: if false;
+      allow create, update, delete: if isAuthed()
+        && request.resource.data.ownerId == request.auth.uid;
+    }
+
+    // --- Usage counters (server-managed) ---
+    match /generationUsage/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false; // only callable functions may write
+      match /periods/{periodId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+    }
+
+    // Catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

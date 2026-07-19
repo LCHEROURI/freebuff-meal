@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "weeknight-meal-planner-dev",
+    "development": "weeknight-meal-planner-dev",
+    "production": "weeknight-meal-planner-prod"
+  }
+}

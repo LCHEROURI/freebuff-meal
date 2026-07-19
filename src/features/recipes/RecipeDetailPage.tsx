@@ -1,0 +1,177 @@
+import { Link, useParams } from 'react-router-dom';
+import { Printer, Share2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+
+import { plansStore, type DemoMealPlan } from '@/utils/demoAdapter';
+import { useAuth } from '@/features/auth/authContext';
+import { AuthenticityBadge, DietaryBadge, AllergenBadge, Pill } from '@/components/common/AllergenBadge';
+import { Button } from '@/components/common/Button';
+import { useToast } from '@/components/common/Toast';
+import { Card } from '@/components/common/Card';
+import type { EmbeddedRecipe } from '@/schemas/mealPlan';
+
+export const RecipeDetailPage = () => {
+  const { recipeId, planId } = useParams<{ recipeId: string; planId: string }>();
+  const { user } = useAuth();
+  const toast = useToast();
+  const [plan, setPlan] = useState<DemoMealPlan | null>(null);
+  const [recipe, setRecipe] = useState<EmbeddedRecipe | null>(null);
+
+  useEffect(() => {
+    if (!user || !planId) return;
+    const found = plansStore.list(user.uid).find((p) => p.id === planId);
+    if (found) {
+      setPlan(found);
+      const r = found.recipes.find((x) => x.id === recipeId);
+      if (r) setRecipe(r);
+    }
+  }, [user, planId, recipeId]);
+
+  if (!plan || !recipe) {
+    return (
+      <p className="text-sm text-ink-500">Recipe not found.</p>
+    );
+  }
+
+  const handleShare = () => {
+    const url = `${window.location.origin}/app/plans/${plan.id}/recipes/${recipe.id}`;
+    navigator.clipboard?.writeText(url).catch(() => {});
+    toast.push({ kind: 'success', title: 'Recipe link copied' });
+  };
+
+  return (
+    <article className="print-friendly">
+      <p className="text-xs text-ink-500">
+        <Link to={`/app/plans/${plan.id}`} className="hover:underline">
+          ← Back to {plan.name}
+        </Link>
+      </p>
+
+      <header className="mt-2 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-wider text-ink-500">
+            {recipe.cuisine} · {recipe.originCountry}
+            {recipe.originCountryCode ? ` (${recipe.originCountryCode})` : ''}
+          </p>
+          <h1 className="text-3xl font-semibold tracking-tight">{recipe.name}</h1>
+          <p className="mt-2 max-w-2xl text-ink-700">{recipe.shortDescription}</p>
+        </div>
+        <AuthenticityBadge label={recipe.authenticityLabel} />
+      </header>
+
+      <div className="mt-4 flex flex-wrap gap-1.5">
+        <Pill>⏱ {recipe.totalTimeMinutes} min total</Pill>
+        <Pill>🍽 {recipe.servings} servings</Pill>
+        <Pill>👨‍🍳 {recipe.difficulty}</Pill>
+        {recipe.dietaryTags?.map((t) => (
+          <DietaryBadge key={t} label={t.replaceAll('_', ' ')} />
+        ))}
+        {recipe.allergenFlags.map((a) => (
+          <AllergenBadge key={a} label={a.replaceAll('_', ' ')} />
+        ))}
+      </div>
+
+      <div className="mt-6 no-print flex flex-wrap gap-2">
+        <Button variant="secondary" size="sm" onClick={() => window.print()} leftIcon={<Printer size={14} aria-hidden="true" />}>
+          Print
+        </Button>
+        <Button variant="secondary" size="sm" onClick={handleShare} leftIcon={<Share2 size={14} aria-hidden="true" />}>
+          Copy link
+        </Button>
+      </div>
+
+      <section className="mt-6 grid gap-4 md:grid-cols-2">
+        <Card title="Equipment">
+          <ul className="list-inside list-disc text-sm">
+            {recipe.equipment.map((e) => <li key={e}>{e}</li>)}
+          </ul>
+        </Card>
+
+        <Card title="Ingredients">
+          <h3 className="sr-only">Ingredients grouped by category</h3>
+          {groupIngredients(recipe).map(({ category, items }) => (
+            <div key={category} className="mt-3 first:mt-0">
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">{category}</p>
+              <ul className="mt-1 divide-y divide-border text-sm">
+                {items.map((ing, i) => (
+                  <li key={`${ing.name}-${i}`} className="flex gap-2 py-1">
+                    <span className="font-medium">{ing.displayText}</span>
+                    {ing.preparationNote && (
+                      <span className="text-ink-500">({ing.preparationNote})</span>
+                    )}
+                    {ing.isOptional && <span className="ml-auto text-xs text-ink-400">optional</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <p className="mt-3 text-xs text-ink-500">
+            <em>Why this dish:</em> {recipe.whyItFits}
+          </p>
+        </Card>
+      </section>
+
+      <Card title="Preparation" className="mt-4">
+        <ol className="list-inside list-decimal space-y-1.5 text-sm">
+          {recipe.preparationSteps.map((s) => (
+            <li key={s.order}>{s.text}</li>
+          ))}
+        </ol>
+      </Card>
+
+      <Card title="Cooking" className="mt-4">
+        <ol className="list-inside list-decimal space-y-1.5 text-sm">
+          {recipe.cookingSteps.map((s) => (
+            <li key={s.order}>{s.text}</li>
+          ))}
+        </ol>
+      </Card>
+
+      {recipe.presentationSuggestions.length > 0 && (
+        <Card title="Presentation" className="mt-4">
+          <ul className="list-inside list-disc space-y-1 text-sm">
+            {recipe.presentationSuggestions.map((s) => <li key={s}>{s}</li>)}
+          </ul>
+        </Card>
+      )}
+
+      {recipe.substitutions.length > 0 && (
+        <Card title="Substitutions" className="mt-4">
+          <ul className="divide-y divide-border text-sm">
+            {recipe.substitutions.map((s) => (
+              <li key={s.original + s.replacement} className="py-2">
+                <strong>{s.original}</strong> → {s.replacement}
+                {s.note && <span className="text-ink-500"> ({s.note})</span>}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {recipe.leftoverInstructions && (
+        <Card title="Leftovers" className="mt-4">
+          <p className="text-sm">{recipe.leftoverInstructions}</p>
+        </Card>
+      )}
+
+      {recipe.foodSafetyNotes.length > 0 && (
+        <Card title="Food safety" className="mt-4">
+          <ul className="list-inside list-disc text-sm">
+            {recipe.foodSafetyNotes.map((s) => <li key={s}>{s}</li>)}
+          </ul>
+        </Card>
+      )}
+    </article>
+  );
+};
+
+import type { Ingredient } from '@/schemas/ingredient';
+const groupIngredients = (r: { ingredients: Ingredient[] }) => {
+  const groups = new Map<string, Ingredient[]>();
+  for (const ing of r.ingredients) {
+    const list = groups.get(ing.category) ?? [];
+    list.push(ing);
+    groups.set(ing.category, list);
+  }
+  return Array.from(groups, ([category, items]) => ({ category, items }));
+};

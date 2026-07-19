@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'tnum';
+  }
+  *:focus-visible {
+    outline: 2px solid theme('colors.sage.600');
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg font-medium
+      transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed
+      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-600
+      focus-visible:ring-offset-2 focus-visible:ring-offset-cream-50;
+  }
+  .btn-primary {
+    @apply btn bg-sage-600 text-white hover:bg-sage-700 px-4 py-2.5;
+  }
+  .btn-secondary {
+    @apply btn bg-white text-ink-900 border border-border hover:bg-cream-100 px-4 py-2.5;
+  }
+  .btn-ghost {
+    @apply btn text-ink-900 hover:bg-cream-100 px-3 py-2;
+  }
+  .btn-danger {
+    @apply btn bg-danger-500 text-white hover:bg-danger-700 px-4 py-2.5;
+  }
+  .input-base {
+    @apply block w-full rounded-lg border border-border bg-white px-3 py-2.5 text-ink-900
+      placeholder:text-ink-400 focus-visible:border-sage-500 focus-visible:ring-2
+      focus-visible:ring-sage-200 focus-visible:outline-none;
+  }
+  .card-base {
+    @apply rounded-xl2 border border-border bg-white p-5 shadow-card;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-border bg-cream-100
+      px-3 py-1 text-sm text-ink-900 transition-colors hover:bg-cream-200;
+  }
+  .chip-active {
+    @apply chip border-sage-600 bg-sage-100 text-sage-800;
+  }
+  .badge-allergen {
+    @apply inline-flex items-center gap-1 rounded-md border border-terracotta-200 bg-terracotta-50
+      px-2 py-0.5 text-xs font-medium text-terracotta-700;
+  }
+  .badge-diet {
+    @apply inline-flex items-center gap-1 rounded-md border border-sage-200 bg-sage-50
+      px-2 py-0.5 text-xs font-medium text-sage-700;
+  }
+  .badge-authenticity {
+    @apply inline-flex items-center gap-1 rounded-md border border-gold-200 bg-gold-50
+      px-2 py-0.5 text-xs font-medium text-gold-500;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  body {
+    background: white;
+    color: black;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-friendly {
+    page-break-inside: avoid;
+    color: black;
+  }
+}

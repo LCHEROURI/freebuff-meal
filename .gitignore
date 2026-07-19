@@ -1,0 +1,33 @@
+node_modules
+dist
+functions/lib
+functions/node_modules
+
+.env
+.env.local
+.env.*.local
+
+# Editor
+.vscode
+.idea
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+firebase-debug.log
+
+# Coverage/artefacts
+coverage
+*.tsbuildinfo
+
+# OS
+.DS_Store
+
+# Freebuff internal — never commit
+.freebuff/
+.firebase/
+firebase-export-*.zip
+
+# Playwright / E2E
+playwright-report/
+test-results/
