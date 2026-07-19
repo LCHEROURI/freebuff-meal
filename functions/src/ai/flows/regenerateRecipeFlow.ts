@@ -13,7 +13,7 @@ import { gemini20Flash } from '@genkit-ai/vertexai';
 import { z } from 'zod';
 
 import { ai } from '../../index.js';
-import { SYSTEM_PROMPT_V1 } from '../prompts/system.js';
+import { PROMPT_VERSION, SYSTEM_PROMPT_V2 } from '../prompts/system.js';
 import {
   RecipeSchema,
   RegenerationRequestSchema,
@@ -57,7 +57,10 @@ export const regenerateRecipeFlow = onCall(
       const avoidExtra = input.reason === 'avoid_ingredient' && input.detail
         ? ` Avoid this ingredient: ${input.detail}.`
         : '';
-      const prompt = `${SYSTEM_PROMPT_V1}\n\nA user is regenerating one recipe in their plan. ${reasonText}${avoidExtra}\n\nConstraints:\n- Do not duplicate any of these recipes: ${input.lockedRecipeIds.join(', ') || '(none)'}\n- Keep the new recipe's \`id\` slot stable (do not invent a new id unless one is not supplied).\n- Plan id: ${input.planId}\n- Original recipe id (preserve unless the AI genuinely needs a new id): ${input.recipeId}`;
+      // Regenerated dishes must also carry per-step timers + honest
+      // substitution ratios — the V2 affordances apply uniformly across
+      // initial generation AND single-recipe regeneration.
+      const prompt = `${SYSTEM_PROMPT_V2}\n\nA user is regenerating one recipe in their plan. ${reasonText}${avoidExtra}\n\nConstraints:\n- Do not duplicate any of these recipes: ${input.lockedRecipeIds.join(', ') || '(none)'}\n- Keep the new recipe's \`id\` slot stable (do not invent a new id unless one is not supplied).\n- Plan id: ${input.planId}\n- Original recipe id (preserve unless the AI genuinely needs a new id): ${input.recipeId}\n- Stamp the recorded \`promptVersion\` as "${PROMPT_VERSION}".`;
 
       const out = await ai.generate({
         model: gemini20Flash,
