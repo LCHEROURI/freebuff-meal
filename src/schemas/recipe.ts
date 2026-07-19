@@ -61,6 +61,19 @@ export const RecipeSchema = z.object({
         original: z.string().min(1),
         replacement: z.string().min(1),
         note: z.string().optional(),
+        /**
+         * Quantity multiplier on swap. 1 = equal quantity, 0.125 = 1/8 as much
+         * (e.g. 1 clove garlic → 1/8 tsp garlic powder). When omitted the
+         * shopper keeps the same quantity/category.
+         */
+        ratio: z.number().positive().optional(),
+        /**
+         * Allergens the chosen substitute *introduces* on top of what the
+         * original carried. Used by the post-plan swap dialog to surface an
+         * explicit warning before applying — a swap to peanut butter in a
+         * peanut-free kitchen should require an explicit confirm.
+         */
+        addedAllergens: z.array(AllergenSchema).optional(),
       }),
     )
     .default([]),
