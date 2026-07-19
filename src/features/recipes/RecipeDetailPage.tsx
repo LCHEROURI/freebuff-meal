@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
-import { Printer, Share2 } from 'lucide-react';
+import { ChefHat, Printer, Share2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { plansStore, type DemoMealPlan } from '@/utils/demoAdapter';
@@ -71,13 +71,20 @@ export const RecipeDetailPage = () => {
         ))}
       </div>
 
-      <div className="mt-6 no-print flex flex-wrap gap-2">
+      <div className="mt-6 no-print flex flex-wrap items-center gap-2">
         <Button variant="secondary" size="sm" onClick={() => window.print()} leftIcon={<Printer size={14} aria-hidden="true" />}>
           Print
         </Button>
         <Button variant="secondary" size="sm" onClick={handleShare} leftIcon={<Share2 size={14} aria-hidden="true" />}>
           Copy link
         </Button>
+        <Link
+          to={`/app/plans/${plan.id}/recipes/${recipe.id}/cook`}
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-tomato-500 px-4 py-2.5 font-medium text-white shadow-warm transition-colors hover:bg-tomato-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-basil-500 focus-visible:ring-offset-2 focus-visible:ring-offset-flour-50"
+        >
+          <ChefHat size={16} aria-hidden="true" />
+          Start cooking
+        </Link>
       </div>
 
       <section className="mt-6 grid gap-4 md:grid-cols-2">

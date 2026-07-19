@@ -17,6 +17,14 @@ export const RecipeStepSchema = z.object({
   text: z.string().min(1).max(600),
   /** Optional category so we can split prep/cooking/presentation. */
   phase: z.enum(['preparation', 'cooking', 'presentation']).default('cooking'),
+  /**
+   * Optional explicit cook timer hint (seconds). Cook Mode renders a
+   * "Start 8-min timer" affordance when present and skips it when
+   * absent (legacy recipes), rendering a manual timer button instead.
+   * Backwards-compatible: existing recipes without this field load
+   * identically; the AI prompt is being updated to populate it.
+   */
+  durationSeconds: z.number().int().positive().max(60 * 60 * 4).optional(),
 });
 export type RecipeStep = z.infer<typeof RecipeStepSchema>;
 
