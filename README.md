@@ -173,7 +173,8 @@ a food-themed placeholder area; the experience stays honest about provenance.
 
 ## Hard restrictions
 
-- No Supabase, no `@supabase/*`, no Vercel/Netlify deployment, no OpenAI/Anthropic.
+- No Supabase, no `@supabase/*`, no OpenAI/Anthropic.
+- Vercel deployment for the frontend only; the rest stays on Firebase.
 - No client-side direct AI calls — all generation happens behind `onCallGenkit`.
 - No client-side mutation of `generationUsage` (rules deny).
 - No public collection listing.

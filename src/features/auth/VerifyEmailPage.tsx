@@ -55,7 +55,6 @@ export const VerifyEmailPage = () => {
           'Check your inbox (or spam folder). Resends are rate-limited — wait a minute before clicking again.',
       });
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('[VerifyEmailPage] resend failed', err);
       toast.push({
         kind: 'error',

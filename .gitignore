@@ -31,3 +31,7 @@ firebase-export-*.zip
 # Playwright / E2E
 playwright-report/
 test-results/
+
+# Vercel CLI tracking
+.vercel/
+.vercel
