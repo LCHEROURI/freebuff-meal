@@ -12,12 +12,16 @@ import { gemini20Flash } from '@genkit-ai/vertexai';
 import { z } from 'zod';
 
 import { ai } from '../../index.js';
-import { SYSTEM_PROMPT_V2 } from '../prompts/system.js';
+import { PROMPT_VERSION, SYSTEM_PROMPT_V2 } from '../prompts/system.js';
 import {
   MealPlanGenerationInputSchema,
   MealPlanSchema,
 } from '../schemas/index.js';
 import { checkRateLimit } from '../../rate-limits/usage.js';
+import {
+  STAMPED_MODEL_NAME,
+  stampGenerationMetadata,
+} from '../audit/stamp.js';
 
 const apiKey = defineSecret('GOOGLE_API_KEY');
 
@@ -32,6 +36,10 @@ export const generateMealPlanFlow = onCall(
     try {
       const input = MealPlanGenerationInputSchema.parse(request.data);
       await checkRateLimit(uid, 'plan');
+      // Wall-clock anchor for server-stamped `durationMs` — captures
+      // the user-visible latency of the whole flow (auth + App Check +
+      // rate-limit + 1–2 Genkit calls).
+      const startedAtMs = Date.now();
 
       const result = await ai.generate({
         model: gemini20Flash,
@@ -53,11 +61,39 @@ export const generateMealPlanFlow = onCall(
         });
         const repaired = MealPlanSchema.safeParse(repair.output);
         if (!repaired.success) {
+          // `'failed'` only survives into a logged metric; the public
+          // caller sees a generic `internal` HttpsError. Surfacing
+          // `repaired: false` to the client would let users infer
+          // internal prompt drift, which we don't want.
+          console.warn('[generateMealPlanFlow] generation failed validation', {
+            uid,
+            modelName: STAMPED_MODEL_NAME,
+            promptVersion: PROMPT_VERSION,
+            retryCount: 1,
+            validation: 'failed',
+            durationMs: Date.now() - startedAtMs,
+            planLength: input.planLength,
+            dietaryPattern: input.dietaryPattern,
+            firstPassError: parsed.error.message,
+            repairPassError: repaired.error.message,
+          });
           throw new HttpsError('internal', 'AI returned an invalid plan after retry.');
         }
-        return { plan: repaired.data };
+        return {
+          plan: stampGenerationMetadata(repaired.data, {
+            durationMs: Date.now() - startedAtMs,
+            retryCount: 1,
+            validation: 'repaired',
+          }),
+        };
       }
-      return { plan: parsed.data };
+      return {
+        plan: stampGenerationMetadata(parsed.data, {
+          durationMs: Date.now() - startedAtMs,
+          retryCount: 0,
+          validation: 'passed',
+        }),
+      };
     } catch (err) {
       if (err instanceof HttpsError) throw err;
       const message = err instanceof Error ? err.message : String(err);
