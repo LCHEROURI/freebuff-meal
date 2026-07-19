@@ -12,7 +12,7 @@ import { gemini20Flash } from '@genkit-ai/vertexai';
 import { z } from 'zod';
 
 import { ai } from '../../index.js';
-import { SYSTEM_PROMPT_V1 } from '../prompts/system.js';
+import { SYSTEM_PROMPT_V2 } from '../prompts/system.js';
 import {
   MealPlanGenerationInputSchema,
   MealPlanSchema,
@@ -35,17 +35,19 @@ export const generateMealPlanFlow = onCall(
 
       const result = await ai.generate({
         model: gemini20Flash,
-        prompt: `${SYSTEM_PROMPT_V1}\n\nUSER INPUT:\n${JSON.stringify(input)}`,
+        prompt: `${SYSTEM_PROMPT_V2}\n\nUSER INPUT:\n${JSON.stringify(input)}`,
         output: { schema: MealPlanSchema as unknown as z.ZodTypeAny },
         config: { temperature: 0.5, maxOutputTokens: 4096 },
       });
 
       const parsed = MealPlanSchema.safeParse(result.output);
       if (!parsed.success) {
-        // Repair-once retry with a corrective system prompt.
+        // Repair-once retry with a corrective system prompt. Uses V2 so a
+        // stale repair can't reintroduce the missing fields the V1 fix
+        // addressed (Cook Mode timers + honest substitution ratios).
         const repair = await ai.generate({
           model: gemini20Flash,
-          prompt: `${SYSTEM_PROMPT_V1}\n\nThe previous response did not validate. Errors: ${parsed.error.message}\n\nUSER INPUT:\n${JSON.stringify(input)}`,
+          prompt: `${SYSTEM_PROMPT_V2}\n\nThe previous response did not validate. Errors: ${parsed.error.message}\n\nUSER INPUT:\n${JSON.stringify(input)}`,
           output: { schema: MealPlanSchema as unknown as z.ZodTypeAny },
           config: { temperature: 0.3, maxOutputTokens: 4096 },
         });
