@@ -11,59 +11,115 @@
   }
   body {
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'tnum';
+    @apply bg-flour-50 text-pepper-700 antialiased;
+    background-image:
+      radial-gradient(circle at 12% 18%, rgba(233, 75, 35, 0.06) 0, transparent 40%),
+      radial-gradient(circle at 88% 8%, rgba(63, 165, 45, 0.05) 0, transparent 35%),
+      radial-gradient(circle at 50% 92%, rgba(216, 149, 0, 0.06) 0, transparent 40%);
+    background-attachment: fixed;
+  }
+  h1, h2 {
+    @apply font-display tracking-tight;
   }
   *:focus-visible {
-    outline: 2px solid theme('colors.sage.600');
+    outline: 2px solid theme('colors.basil.600');
     outline-offset: 2px;
     border-radius: 4px;
   }
 }
 
 @layer components {
+  /* ─── Buttons ─────────────────────────────────────────────────── */
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-lg font-medium
       transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed
-      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sage-600
-      focus-visible:ring-offset-2 focus-visible:ring-offset-cream-50;
+      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-basil-500
+      focus-visible:ring-offset-2 focus-visible:ring-offset-flour-50;
   }
   .btn-primary {
-    @apply btn bg-sage-600 text-white hover:bg-sage-700 px-4 py-2.5;
+    @apply btn bg-tomato-500 text-white shadow-warm hover:bg-tomato-600 px-4 py-2.5;
   }
   .btn-secondary {
-    @apply btn bg-white text-ink-900 border border-border hover:bg-cream-100 px-4 py-2.5;
+    @apply btn bg-basil-100 text-pepper-700 border border-basil-300 hover:bg-basil-200 px-4 py-2.5;
   }
   .btn-ghost {
-    @apply btn text-ink-900 hover:bg-cream-100 px-3 py-2;
+    @apply btn text-pepper-700 hover:bg-butter-100 px-3 py-2;
   }
   .btn-danger {
     @apply btn bg-danger-500 text-white hover:bg-danger-700 px-4 py-2.5;
   }
+
+  /* ─── Form fields ────────────────────────────────────────────── */
   .input-base {
-    @apply block w-full rounded-lg border border-border bg-white px-3 py-2.5 text-ink-900
-      placeholder:text-ink-400 focus-visible:border-sage-500 focus-visible:ring-2
-      focus-visible:ring-sage-200 focus-visible:outline-none;
+    @apply block w-full rounded-lg border border-butter-300 bg-flour-50 px-3 py-2.5 text-pepper-700
+      placeholder:text-pepper-400 focus-visible:border-basil-500 focus-visible:ring-2
+      focus-visible:ring-basil-200 focus-visible:outline-none;
   }
+
+  /* ─── Card ───────────────────────────────────────────────────── */
   .card-base {
-    @apply rounded-xl2 border border-border bg-white p-5 shadow-card;
+    @apply rounded-xl2 border border-butter-200 bg-butter-50 p-5 shadow-card;
   }
+  .card-spice {
+    @apply rounded-xl2 border border-tomato-200 bg-tomato-50 p-5 shadow-warm;
+  }
+
+  /* ─── Chips ──────────────────────────────────────────────────── */
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-border bg-cream-100
-      px-3 py-1 text-sm text-ink-900 transition-colors hover:bg-cream-200;
+    @apply inline-flex items-center gap-1.5 rounded-full border border-butter-300 bg-butter-50
+      px-3 py-1 text-sm text-pepper-700 transition-colors hover:bg-butter-100;
   }
   .chip-active {
-    @apply chip border-sage-600 bg-sage-100 text-sage-800;
+    @apply chip border-tomato-500 bg-tomato-100 text-tomato-700;
   }
+
+  /* ─── Badges (allergen / diet / authenticity) ────────────────── */
   .badge-allergen {
-    @apply inline-flex items-center gap-1 rounded-md border border-terracotta-200 bg-terracotta-50
-      px-2 py-0.5 text-xs font-medium text-terracotta-700;
+    @apply inline-flex items-center gap-1 rounded-md border border-paprika-200 bg-paprika-50
+      px-2 py-0.5 text-xs font-medium text-paprika-700;
   }
   .badge-diet {
-    @apply inline-flex items-center gap-1 rounded-md border border-sage-200 bg-sage-50
-      px-2 py-0.5 text-xs font-medium text-sage-700;
+    @apply inline-flex items-center gap-1 rounded-md border border-basil-200 bg-basil-50
+      px-2 py-0.5 text-xs font-medium text-basil-700;
   }
   .badge-authenticity {
-    @apply inline-flex items-center gap-1 rounded-md border border-gold-200 bg-gold-50
-      px-2 py-0.5 text-xs font-medium text-gold-500;
+    @apply inline-flex items-center gap-1 rounded-md border border-turmeric-300 bg-turmeric-100
+      px-2 py-0.5 text-xs font-medium text-turmeric-700;
+  }
+
+  /* ─── Section helpers (gradient surfaces) ────────────────────── */
+  .section-soft {
+    @apply bg-gradient-soft;
+  }
+  .section-warm {
+    @apply bg-gradient-warm;
+  }
+  .section-spice {
+    @apply bg-gradient-spice text-white;
+  }
+  .section-fresh {
+    @apply bg-gradient-fresh text-white;
+  }
+
+  /* ─── Brand mark ─────────────────────────────────────────────── */
+  .brand-mark {
+    @apply inline-flex items-center gap-2 font-display text-lg font-semibold tracking-tight;
+  }
+}
+
+@layer utilities {
+  /* Decorative herb-scatter background used on the hero.
+     Inline SVG data-URI: ~6% opacity, sits above the body gradient.
+     Pointer-events disabled so it never interferes with clicks. */
+  .bg-herbs {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240' viewBox='0 0 240 240'><g fill='%23ffffff' fill-opacity='0.06'><path d='M40 60 q12 -22 32 -10 q-6 24 -32 10 z'/><path d='M180 40 q14 18 -2 34 q-22 -10 2 -34 z'/><circle cx='110' cy='150' r='4'/><circle cx='200' cy='180' r='6'/><circle cx='60' cy='200' r='3'/><path d='M150 110 q8 -10 18 -2 q-4 14 -18 2 z'/><path d='M80 130 q6 10 -4 18 q-12 -6 4 -18 z'/></g></svg>");
+    background-repeat: repeat;
+    background-size: 240px 240px;
+  }
+
+  /* Brand-colored cuisine chip stripe used by MealPlanPage */
+  .cuisine-stripe {
+    @apply h-1 w-full rounded-t-xl2;
   }
 }
 
