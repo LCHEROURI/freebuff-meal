@@ -8,6 +8,7 @@ import { Button } from '@/components/common/Button';
 import { Card } from '@/components/common/Card';
 import { Input, Select } from '@/components/common/Input';
 import { Chip } from '@/components/common/Chip';
+import { VoiceInputButton } from '@/components/common/VoiceInputButton';
 import { UserProfileSchema, type UserProfile } from '@/schemas/auth';
 import {
   AllergenSchema,
@@ -140,6 +141,7 @@ export const OnboardingPage = () => {
             <div className="space-y-4">
               <Input
                 label="Display name"
+                rightIcon={<VoiceInputButton />}
                 {...register('displayName')}
                 error={errors.displayName?.message}
                 required
@@ -235,6 +237,7 @@ export const OnboardingPage = () => {
               <Input
                 label="Other ingredients to avoid (comma separated)"
                 placeholder="e.g. cilantro, anchovies"
+                rightIcon={<VoiceInputButton />}
                 {...register('excludedIngredients')}
               />
             </div>

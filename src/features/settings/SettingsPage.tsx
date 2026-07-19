@@ -9,6 +9,7 @@ import { Button } from '@/components/common/Button';
 import { Input, Select } from '@/components/common/Input';
 import { Chip } from '@/components/common/Chip';
 import { Dialog } from '@/components/common/Dialog';
+import { VoiceInputButton } from '@/components/common/VoiceInputButton';
 import { useToast } from '@/components/common/Toast';
 import { useAuth } from '@/features/auth/authContext';
 import { ensureProfile, profileStore } from '@/utils/demoAdapter';
@@ -188,7 +189,12 @@ export const SettingsPage = () => {
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <SectionCard title="Profile">
           <div className="grid gap-3 md:grid-cols-2">
-            <Input label="Display name" {...register('displayName')} error={errors.displayName?.message} />
+            <Input
+              label="Display name"
+              rightIcon={<VoiceInputButton />}
+              {...register('displayName')}
+              error={errors.displayName?.message}
+            />
             <Input
               label="Household size"
               type="number"
