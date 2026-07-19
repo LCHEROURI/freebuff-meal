@@ -51,14 +51,18 @@ const describeRules = process.env.FIRESTORE_EMULATOR_HOST
 
 describeRules('firestore rules — spec §9 contract', () => {
   /**
-   * `env` is nullish until `beforeAll` populates it. We type the binding
-   * `T | undefined` so a misuse reads as a compile error elsewhere —
-   * `assertEnv()` narrows it on demand and serves as the single runtime
-   * invariant documenter.
+   * `env` is nullish until `beforeAll` populates it. We use the definite-
+   * assignment assertion `!` so TypeScript treats the binding as
+   * `RulesTestEnvironment` throughout the file — the `beforeAll` initialiser
+   * runs before any hook or `it`, and vitest guarantees that ordering. The
+   * `assertEnv(env)` runtime check remains in a few call sites as a guard
+   * against a hypothetical failed initialiser.
    */
-  let env: RulesTestEnvironment | undefined;
+  let env!: RulesTestEnvironment;
 
-  function assertEnv(): asserts env is RulesTestEnvironment {
+  function assertEnv(
+    env: RulesTestEnvironment | undefined,
+  ): asserts env is RulesTestEnvironment {
     if (!env) {
       throw new Error(
         'RulesTestEnvironment must be initialized by beforeAll before any hook or test runs.',
@@ -76,13 +80,13 @@ describeRules('firestore rules — spec §9 contract', () => {
   });
 
   afterAll(async () => {
-    assertEnv();
+    assertEnv(env);
     await env.cleanup();
   });
 
   /** Reset between tests so seeds from one test don't leak into another. */
   beforeEach(async () => {
-    assertEnv();
+    assertEnv(env);
     await env.clearFirestore();
   });
 
@@ -96,7 +100,7 @@ describeRules('firestore rules — spec §9 contract', () => {
     path: string,
     data: Record<string, unknown>,
   ): Promise<void> => {
-    assertEnv();
+    assertEnv(env);
     await env.withSecurityRulesDisabled(async (ctx) => {
       await ctx.firestore().doc(path).set(data);
     });
