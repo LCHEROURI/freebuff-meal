@@ -8,6 +8,7 @@ import { useAuth } from './authContext';
 import { Button } from '@/components/common/Button';
 import { Input } from '@/components/common/Input';
 import { Card } from '@/components/common/Card';
+import { VoiceInputButton } from '@/components/common/VoiceInputButton';
 import { useToast } from '@/components/common/Toast';
 import { SignUpSchema, type SignUpValues } from '@/schemas/auth';
 
@@ -52,6 +53,7 @@ export const SignupPage = () => {
           <Input
             label="Display name"
             autoComplete="name"
+            rightIcon={<VoiceInputButton />}
             {...register('displayName')}
             error={errors.displayName?.message}
             required

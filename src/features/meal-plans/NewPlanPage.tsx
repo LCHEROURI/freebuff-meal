@@ -8,6 +8,7 @@ import { SectionCard } from '@/components/common/Card';
 import { Button } from '@/components/common/Button';
 import { Input, Select, Textarea } from '@/components/common/Input';
 import { Chip } from '@/components/common/Chip';
+import { VoiceInputButton } from '@/components/common/VoiceInputButton';
 import { AllergenSchema, DietaryPatternSchema, type Allergen, type DietaryPattern } from '@/schemas/ingredient';
 import { MealPlanGenerationInputSchema, type MealPlanGenerationInput } from '@/schemas/mealPlan';
 import { InlineSpinner } from '@/components/common/LoadingState';
@@ -205,6 +206,7 @@ export const NewPlanPage = () => {
             <Input
               label="Other ingredients to exclude (comma-separated)"
               placeholder="e.g. cilantro, anchovies"
+              rightIcon={<VoiceInputButton />}
               {...register('excludedIngredients')}
             />
           </div>
@@ -262,11 +264,13 @@ export const NewPlanPage = () => {
             <Input
               label="Pantry ingredients (comma-separated)"
               placeholder="e.g. canned tomatoes, rice, chickpeas"
+              rightIcon={<VoiceInputButton />}
               {...register('pantryIngredients')}
             />
             <Input
               label="Use soon (comma-separated)"
               placeholder="e.g. spinach, ripe tomatoes"
+              rightIcon={<VoiceInputButton />}
               {...register('useSoonIngredients')}
             />
             <Select label="Skill level" {...register('skillLevel')}>
@@ -288,11 +292,16 @@ export const NewPlanPage = () => {
         </SectionCard>
 
         <SectionCard title="Anything else?">
-          <Textarea
-            label="Free-text notes for the AI"
-            placeholder={EXAMPLE_NOTE}
-            {...register('notes')}
-          />
+          <div data-voice-host className="relative">
+            <Textarea
+              label="Free-text notes for the AI"
+              placeholder={EXAMPLE_NOTE}
+              {...register('notes')}
+            />
+            <div className="mt-1 flex justify-end">
+              <VoiceInputButton />
+            </div>
+          </div>
           <p className="mt-2 text-xs text-ink-500">
             Tip: mention cuisine preferences, ingredients on hand, or anything
             you want to avoid. The AI will combine this with the structured
