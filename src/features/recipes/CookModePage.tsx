@@ -499,29 +499,70 @@ export const CookModePage = () => {
         )}
       </Card>
 
-      {/* Timer chip-tray overlay — active timer floating badge. */}
-      {activeTimer && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="no-print pointer-events-none fixed left-1/2 top-4 z-30 -translate-x-1/2"
-        >
-          <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-pepper-700 px-4 py-2 text-white shadow-warm">
-            <Timer size={14} aria-hidden="true" />
-            <span className="font-display text-lg tabular-nums">
-              {fmtClock(remainingMs)}
-            </span>
-            <button
-              type="button"
-              aria-label="Dismiss timer"
-              className="rounded-full p-1 hover:bg-white/15"
-              onClick={cancelActiveTimer}
-            >
-              <X size={12} aria-hidden="true" />
-            </button>
+      {/* Timer chip-tray overlay — active timer floating badge with
+          radial progress ring + remaining/total visual so the cook can
+          glance at it from across the kitchen. */}
+      {activeTimer && (() => {
+        // Radius 10, circumference = 2πr ≈ 62.83. % complete = elapsed/duration.
+        const elapsed = Math.min(activeTimer.durationMs, now - activeTimer.startedAt);
+        const pct = activeTimer.durationMs === 0
+          ? 0
+          : Math.max(0, Math.min(1, 1 - elapsed / activeTimer.durationMs));
+        const circumference = 2 * Math.PI * 10;
+        const dashOffset = circumference * pct;
+        const totalLabel = fmtClock(activeTimer.durationMs);
+        return (
+          <div
+            role="status"
+            aria-live="polite"
+            className="no-print pointer-events-none fixed left-1/2 top-4 z-30 -translate-x-1/2"
+          >
+            <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-pepper-700 px-4 py-2 text-white shadow-warm">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                className="-rotate-90"
+              >
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="rgba(255,255,255,0.25)"
+                  strokeWidth="2"
+                  fill="none"
+                />
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="white"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  fill="none"
+                  strokeDasharray={circumference}
+                  strokeDashoffset={dashOffset}
+                />
+              </svg>
+              <span className="font-display text-lg tabular-nums">
+                {fmtClock(remainingMs)}
+              </span>
+              <span className="text-xs text-white/70 tabular-nums" aria-hidden="true">
+                / {totalLabel}
+              </span>
+              <button
+                type="button"
+                aria-label="Dismiss timer"
+                className="rounded-full p-1 hover:bg-white/15"
+                onClick={cancelActiveTimer}
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Big-tap nav — mobile pinned-bottom, desktop row. */}
       <nav className="no-print fixed inset-x-0 bottom-0 z-20 border-t border-butter-200 bg-flour-50 p-3 md:static md:z-auto md:border-0 md:bg-transparent md:p-0">
