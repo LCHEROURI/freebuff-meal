@@ -15,6 +15,24 @@ import { regenerateRecipeFlow } from './ai/flows/regenerateRecipeFlow.js';
 import { createShare, revokeShare } from './sharing/sharingFlows.js';
 import { purgeUserData, onAuthUserDeleted } from './auth/userDeletion.js';
 import { config } from './config/index.js';
+import {
+  saveAvailableIngredients,
+  updateAvailableIngredients,
+  generateRecipe,
+  validateRecipe,
+  startCookingSession,
+  getCurrentStep,
+  completeCurrentStep,
+  repeatCurrentStep,
+  previousStep,
+  replaceIngredient,
+  resizeRecipe,
+  startTimer,
+  pauseCookingSession,
+  resumeCookingSession,
+  endCookingSession,
+  extractIngredientsFromSpeech,
+} from './agent/index.js';
 
 export const ai = genkit({
   plugins: [vertexAI({ location: config.region })],
@@ -27,4 +45,20 @@ export {
   revokeShare,
   purgeUserData,
   onAuthUserDeleted,
+  saveAvailableIngredients,
+  updateAvailableIngredients,
+  generateRecipe,
+  validateRecipe,
+  startCookingSession,
+  getCurrentStep,
+  completeCurrentStep,
+  repeatCurrentStep,
+  previousStep,
+  replaceIngredient,
+  resizeRecipe,
+  startTimer,
+  pauseCookingSession,
+  resumeCookingSession,
+  endCookingSession,
+  extractIngredientsFromSpeech,
 };

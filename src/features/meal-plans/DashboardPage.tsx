@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Plus, History, Sparkles } from 'lucide-react';
+import { ChefHat, Plus, History, Sparkles } from 'lucide-react';
 
 import { Button } from '@/components/common/Button';
 import { Card, SectionCard } from '@/components/common/Card';
@@ -31,9 +31,19 @@ export const DashboardPage = () => {
             Pick a featured dish or generate a fresh plan for the week.
           </p>
         </div>
-        <Button asChildLink to="/app/new-plan" variant="primary" leftIcon={<Plus size={16} aria-hidden="true" />}>
-          New meal plan
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            asChildLink
+            to="/app/agent"
+            variant="secondary"
+            leftIcon={<ChefHat size={16} aria-hidden="true" />}
+          >
+            Cook with me (voice)
+          </Button>
+          <Button asChildLink to="/app/new-plan" variant="primary" leftIcon={<Plus size={16} aria-hidden="true" />}>
+            New meal plan
+          </Button>
+        </div>
       </header>
 
       <SectionCard
