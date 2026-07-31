@@ -36,9 +36,17 @@ export const NewPlanPage = () => {
   const [generating, setGenerating] = useState(false);
 
   const profile = user ? ensureProfile(user.uid) : null;
+  // The Settings `defaultPlanLength` is now `number` (int 1..7), but the
+  // AI plan-record schema still restricts `planLength` to literal 3|5|7.
+  // This is a deliberately half-finished widening — Settings accepts the
+  // wider range so the user can express "2 dinners/week", but the AI plan
+  // pipeline still emits a fixed-cardinality plan record. We cast here at
+  // the form-boundary so the resolver's literal-union check stays green; if
+  // the user's setting isn't a valid literal, zod will surface a validation
+  // error on submit rather than silently coercing it.
   const defaults = profile
     ? {
-        planLength: profile.defaultPlanLength,
+        planLength: profile.defaultPlanLength as 3 | 5 | 7,
         servings: profile.defaultServings,
         maxTotalTimeMinutes: profile.maxTotalTimeMinutes,
         dietaryPattern: profile.dietaryPattern,
