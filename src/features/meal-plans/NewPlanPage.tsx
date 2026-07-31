@@ -15,12 +15,15 @@ import { InlineSpinner } from '@/components/common/LoadingState';
 import { useAuth } from '@/features/auth/authContext';
 import { ensureProfile, profileStore, plansStore, type DemoMealPlan } from '@/utils/demoAdapter';
 import { useToast } from '@/components/common/Toast';
+import {
+  DEFAULT_AVAILABLE_EQUIPMENT,
+  DEFAULT_FAVORITE_CUISINES,
+  normalizeCategoryName,
+} from '@/features/settings/categories';
 import { usePlanService } from './mealPlanService';
 import { GenerationProgress } from './GenerationProgress';
 
-const CUISINES = ['Italian', 'Mexican', 'Greek', 'Japanese', 'Indian', 'Thai', 'French', 'North African', 'American', 'Middle Eastern'];
 const PROTEINS = ['chicken', 'beef', 'pork', 'fish', 'tofu', 'eggs', 'lentils', 'chickpeas'];
-const EQUIPMENT = ['Stovetop', 'Oven', 'Sheet pan', 'Air fryer', 'Wok', 'Pressure cooker', 'Slow cooker', 'Blender'];
 
 const EXAMPLE_NOTE =
   'Plan five dinners for two people. Use the chicken thighs, spinach, rice, and tomatoes I already have. Keep each dinner under 40 minutes. Include Italian, Greek, and North African dishes. Avoid mushrooms.';
@@ -64,6 +67,28 @@ export const NewPlanPage = () => {
         leftoverPreference: 'some' as const,
         notes: '',
       };
+
+  // Per-plan defaults: include the user's saved cuisine + equipment
+  // selections AND any customs they've added — so the chip tray on the
+  // plan form is consistent with the Settings screen.
+  const safeNormalise = (raw: string): string | null =>
+    normalizeCategoryName(raw);
+  const allCuisines = Array.from(
+    new Set([
+      ...DEFAULT_FAVORITE_CUISINES,
+      ...(profile?.customFavoriteCuisines ?? [])
+        .map(safeNormalise)
+        .filter((c): c is string => c !== null),
+    ]),
+  );
+  const allEquipment = Array.from(
+    new Set([
+      ...DEFAULT_AVAILABLE_EQUIPMENT,
+      ...(profile?.customEquipment ?? [])
+        .map(safeNormalise)
+        .filter((c): c is string => c !== null),
+    ]),
+  );
 
   const {
     register,
@@ -217,7 +242,7 @@ export const NewPlanPage = () => {
             <fieldset>
               <legend className="mb-2 text-sm font-medium">Preferred cuisines</legend>
               <div className="flex flex-wrap gap-2">
-                {CUISINES.map((c) => (
+                {allCuisines.map((c) => (
                   <Chip
                     key={c}
                     active={(values.preferredCuisines ?? []).includes(c)}
@@ -245,7 +270,7 @@ export const NewPlanPage = () => {
             <fieldset>
               <legend className="mb-2 text-sm font-medium">Available equipment</legend>
               <div className="flex flex-wrap gap-2">
-                {EQUIPMENT.map((e) => (
+                {allEquipment.map((e) => (
                   <Chip
                     key={e}
                     active={(values.availableEquipment ?? []).includes(e)}

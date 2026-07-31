@@ -27,10 +27,18 @@ service cloud.firestore {
           'displayName', 'householdSize', 'defaultServings', 'defaultPlanLength',
           'maxTotalTimeMinutes', 'dietaryPattern', 'allergens',
           'excludedIngredients', 'favoriteCuisines', 'dislikedCuisines',
-          'preferredProteins', 'availableEquipment', 'skillLevel',
-          'budgetPreference', 'leftoverPreference', 'measurementSystem',
-          'timezone', 'onboardingCompleted', 'updatedAt'
-        ]);
+          'preferredProteins', 'availableEquipment',
+          'customFavoriteCuisines', 'customEquipment',
+          'skillLevel', 'budgetPreference', 'leftoverPreference',
+          'measurementSystem', 'timezone', 'onboardingCompleted', 'updatedAt'
+        ])
+        // Defensive bounds on the user-controlled custom-category lists —
+        // mirrors the Zod `max(20)` and blocks a client pushing empty
+        // strings or runaway sizes at the trust boundary.
+        && (!('customFavoriteCuisines' in request.resource.data)
+            || request.resource.data.customFavoriteCuisines.size() <= 20)
+        && (!('customEquipment' in request.resource.data)
+            || request.resource.data.customEquipment.size() <= 20);
     }
 
     // --- Meal Plans ---
