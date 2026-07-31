@@ -246,10 +246,14 @@ export const SettingsPage = () => {
               max={12}
               {...register('defaultServings', { valueAsNumber: true })}
             />
-            <Select label="Default plan length" {...register('defaultPlanLength', { valueAsNumber: true })}>
-              <option value={3}>3 dinners</option>
-              <option value={5}>5 dinners</option>
-              <option value={7}>7 dinners</option>
+            <Select label="Plan length" {...register('defaultPlanLength', { valueAsNumber: true })}>
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+              <option value={3}>3</option>
+              <option value={4}>4</option>
+              <option value={5}>5</option>
+              <option value={6}>6</option>
+              <option value={7}>7</option>
             </Select>
             <Input
               label="Max time per meal (min)"

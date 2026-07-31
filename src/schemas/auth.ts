@@ -10,7 +10,7 @@ export const UserProfileSchema = z.object({
   email: z.string().email().optional(),
   householdSize: z.number().int().min(1).max(12).default(2),
   defaultServings: z.number().int().min(1).max(12).default(2),
-  defaultPlanLength: z.union([z.literal(3), z.literal(5), z.literal(7)]).default(5),
+  defaultPlanLength: z.number().int().min(1).max(7).default(5),
   maxTotalTimeMinutes: z.number().int().min(15).max(180).default(45),
   dietaryPattern: DietaryPatternSchema.default('none'),
   allergens: z.array(AllergenSchema).max(40).default([]),
