@@ -15,10 +15,20 @@ export const UserProfileSchema = z.object({
   dietaryPattern: DietaryPatternSchema.default('none'),
   allergens: z.array(AllergenSchema).max(40).default([]),
   excludedIngredients: z.array(z.string().max(60)).max(40).default([]),
-  favoriteCuisines: z.array(z.string().max(40)).max(10).default([]),
+  favoriteCuisines: z.array(z.string().max(40)).max(20).default([]),
   dislikedCuisines: z.array(z.string().max(40)).max(10).default([]),
   preferredProteins: z.array(z.string().max(40)).max(10).default([]),
   availableEquipment: z.array(z.string().max(40)).max(20).default([]),
+  /**
+   * User-defined custom categories. Kept separate from the selection arrays
+   * (`favoriteCuisines`, `availableEquipment`) so we can:
+   *  1. Distinguish defaults (curated, shared across users) from customs.
+   *  2. Let users remove customs without losing defaults.
+   *  3. Render the chip tray as `defaults + customs` without de-duping the
+   *     selection set every render.
+   */
+  customFavoriteCuisines: z.array(z.string().min(1).max(40)).max(20).default([]),
+  customEquipment: z.array(z.string().min(1).max(40)).max(20).default([]),
   skillLevel: z.enum(['beginner', 'intermediate', 'advanced']).default('intermediate'),
   budgetPreference: z.enum(['everyday', 'moderate', 'splurge']).default('everyday'),
   leftoverPreference: z.enum(['none', 'some', 'lots']).default('some'),

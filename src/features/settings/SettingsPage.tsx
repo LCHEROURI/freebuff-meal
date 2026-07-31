@@ -23,6 +23,12 @@ import {
   type Allergen,
   type DietaryPattern,
 } from '@/schemas/ingredient';
+import { CategoryChipTray } from './CategoryChipTray';
+import {
+  DEFAULT_AVAILABLE_EQUIPMENT,
+  DEFAULT_FAVORITE_CUISINES,
+} from './categories';
+import { useCategoryStore } from './categoryStore';
 import {
   availableReauthMethods,
   deleteCurrentAccount,
@@ -68,13 +74,44 @@ export const SettingsPage = () => {
     setValue(field as keyof UserProfile, Array.from(current) as never, { shouldDirty: true });
   };
 
+  // Zustand v5 API contract:
+  //   ─ `useCategoryStore()` returns the *state snapshot*, NOT the hook.
+  //   ─ To call `getState`/`setState`/`subscribe`, use the bare module ref.
+  // We never bind a `categoryStore` variable on the snapshot. The bare
+  // import below is enough — no `void` statement needed.
+
   useEffect(() => {
     if (user) ensureProfile(user.uid);
   }, [user]);
 
+  // Hydrate the cross-screen custom-categories cache so future filters see
+  // what the user added the moment this form mounts. The no-op guard inside
+  // `hydrate(...)` makes this safe under React 18 strict-mode double-mount.
+  useEffect(() => {
+    if (!user) return;
+    useCategoryStore.getState().hydrate(user.uid, {
+      customFavoriteCuisines: defaults.customFavoriteCuisines ?? [],
+      customEquipment: defaults.customEquipment ?? [],
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
+
   const onSubmit = (data: UserProfile) => {
     if (!user) return;
     profileStore.write(user.uid, { ...data, onboardingCompleted: true });
+    // Publish post-save customs through `setState({...})` so subscribers
+    // (future dashboard quick-toggles, cuisine filter chips) re-render
+    // immediately. Direct property assignment would bypass reactivity.
+    const prev = useCategoryStore.getState().byUid;
+    useCategoryStore.setState({
+      byUid: {
+        ...prev,
+        [user.uid]: {
+          customFavoriteCuisines: data.customFavoriteCuisines ?? [],
+          customEquipment: data.customEquipment ?? [],
+        },
+      },
+    });
     toast.push({ kind: 'success', title: 'Settings saved' });
   };
 
@@ -272,34 +309,28 @@ export const SettingsPage = () => {
         </SectionCard>
 
         <SectionCard title="Cuisines & equipment">
-          <fieldset>
-            <legend className="mb-2 text-sm font-medium">Favorite cuisines</legend>
-            <div className="flex flex-wrap gap-2">
-              {['Italian', 'Mexican', 'Greek', 'Indian', 'Japanese', 'Thai', 'North African', 'American'].map((c) => (
-                <Chip
-                  key={c}
-                  active={(values.favoriteCuisines ?? []).includes(c)}
-                  onClick={() => toggleArray('favoriteCuisines', c)}
-                >
-                  {c}
-                </Chip>
-              ))}
-            </div>
-          </fieldset>
-          <fieldset className="mt-4">
-            <legend className="mb-2 text-sm font-medium">Equipment</legend>
-            <div className="flex flex-wrap gap-2">
-              {['Stovetop', 'Oven', 'Sheet pan', 'Air fryer'].map((e) => (
-                <Chip
-                  key={e}
-                  active={(values.availableEquipment ?? []).includes(e)}
-                  onClick={() => toggleArray('availableEquipment', e)}
-                >
-                  {e}
-                </Chip>
-              ))}
-            </div>
-          </fieldset>
+          <CategoryChipTray
+            watch={watch as unknown as (k: string) => string[] | undefined}
+            setValue={setValue as unknown as (k: string, v: string[], o?: { shouldDirty?: boolean }) => void}
+            selectedField="favoriteCuisines"
+            customField="customFavoriteCuisines"
+            defaults={DEFAULT_FAVORITE_CUISINES}
+            legend="Favorite cuisines"
+            placeholder="e.g. Korean"
+            addHint="Custom cuisines are saved with your profile. Type the name and press Enter."
+          />
+          <div className="mt-4">
+            <CategoryChipTray
+              watch={watch as unknown as (k: string) => string[] | undefined}
+              setValue={setValue as unknown as (k: string, v: string[], o?: { shouldDirty?: boolean }) => void}
+              selectedField="availableEquipment"
+              customField="customEquipment"
+              defaults={DEFAULT_AVAILABLE_EQUIPMENT}
+              legend="Equipment"
+              placeholder="e.g. Sous-vide"
+              addHint="Custom equipment lets the AI suggest dishes that match your kitchen."
+            />
+          </div>
         </SectionCard>
 
         <div className="mt-6 flex justify-end">
