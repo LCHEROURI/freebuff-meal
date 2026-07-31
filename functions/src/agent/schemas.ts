@@ -338,6 +338,7 @@ export const TOOL_NAMES = [
   'resume_cooking_session',
   'end_cooking_session',
   'ask_chef', // CookVoiceOverlay conversational tip loop (PR #15).
+  'parse_timer_utterance', // CookVoiceOverlay timer-conversation loop (PR #22).
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
@@ -365,5 +366,42 @@ export const AskChefResponseSchema = z.object({
    *  chip — does NOT auto-trigger tool calls. */
   followUp: z.string().nullable().default(null),
 });
+
+/** ----------------------------------------------------------------
+ *  parse_timer_utterance — CookVoiceOverlay timer-conversation loop
+ *  (PR #22).
+ *
+ *  Extends the existing 16 cooking-agent tools with a structured
+ *  timer-intent extractor. The overlay's PTT pipeline routes any
+ *  timer-shaped utterance through this callable instead of the
+ *  generic culinary-tip `ask_chef`. Same Firebase guard pattern
+ *  (enforceAppCheck + secret), same permissive session lookup (the
+ *  overlay uses synthetic `cookmode:` ids), same LRU shape.
+ *  ---------------------------------------------------------------*/
+export const ParseTimerUtteranceRequestSchema = z.object({
+  sessionId: z.string().min(1).max(80),
+  utterance: z.string().min(2).max(400),
+  /** Client-side normalized cache key. Server re-normalizes when
+   *  missing. Same shape as `ask_chef` cache key. */
+  cacheKey: z.string().min(1).max(120).optional(),
+  /** Optional hint from the cook's current step. Used only by the
+   *  LLM fallback when the utterance is implicit ("I'm putting it
+   *  in the oven now"). The server's already-handled regex path
+   *  ignores this. */
+  currentStepPhase: z.enum(['preparation', 'cooking', 'presentation']).optional(),
+});
+export const ParseTimerUtteranceResponseSchema = z.object({
+  action: z.enum(['start', 'none']),
+  durationSeconds: z.number().int().positive().max(60 * 60 * 4).nullable(),
+  /** Which pipeline resolved the utterance. 'regex' is the fast
+   *  client+server path and skips the LLM entirely; 'llm' was used
+   *  when the regex couldn't confidently match; 'fallback' means
+   *  both failed and the caller should fall back to its own logic. */
+  source: z.enum(['regex', 'llm', 'fallback']),
+  /** 0..1, the model's self-rated confidence. */
+  confidence: z.number().min(0).max(1),
+});
+export type ParseTimerUtteranceRequest = z.infer<typeof ParseTimerUtteranceRequestSchema>;
+export type ParseTimerUtteranceResponse = z.infer<typeof ParseTimerUtteranceResponseSchema>;
 export type AskChefRequest = z.infer<typeof AskChefRequestSchema>;
 export type AskChefResponse = z.infer<typeof AskChefResponseSchema>;

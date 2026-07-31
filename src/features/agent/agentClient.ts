@@ -254,6 +254,27 @@ export const agentClient = {
         followUp: string | null;
       }
     >('askChef', args),
+
+  /** CookVoiceOverlay "start the timer" voice path (PR #22).
+   *  Extracts {action: 'start' | 'none', durationSeconds, source,
+   *  confidence} from a single push-to-talk utterance. Returns the
+   *  same shape in both modes; the demo path is regex-only and
+   *  skips the LLM entirely. */
+  parseTimerUtterance: (args: {
+    sessionId: string;
+    utterance: string;
+    currentStepPhase?: 'preparation' | 'cooking' | 'presentation';
+    cacheKey?: string;
+  }) =>
+    callTool<
+      typeof args,
+      {
+        action: 'start' | 'none';
+        durationSeconds: number | null;
+        source: 'regex' | 'llm' | 'fallback';
+        confidence: number;
+      }
+    >('parseTimerUtterance', args),
 };
 
 // =====================================================================
@@ -628,6 +649,19 @@ const localDemoAgent = {
       followUp: null,
     };
   },
+
+  parseTimerUtterance: (args: {
+    sessionId: string;
+    utterance: string;
+    currentStepPhase?: 'preparation' | 'cooking' | 'presentation';
+    cacheKey?: string;
+  }) => {
+    // Demo mode runs the same regex-only timer parser the live
+    // CookVoiceOverlay does on the client. The full LLM path is
+    // skipped because there's no Firebase in demo mode.
+    void args;
+    return demoParseTimerUtterance(args.utterance);
+  },
 };
 
 /**
@@ -714,6 +748,76 @@ const demoAskChefLookup = (
     return `I see you're following: ${stepText.slice(0, 80)}. Take it one step at a time.`;
   }
   return "I'm in demo mode right now — the full sous-chef needs a Firebase project to answer that.";
+};
+
+// Demo-mode timer parser. Mirrors the server-side regex-and-words
+// logic in `serverParseTimerRegex` so demo users see the same fast
+// answer shape (`{action: 'start'|'none', durationSeconds, source:
+// 'regex'}`). LLM fallback is intentionally out of scope for demo
+// mode — Firebase would be required to hit Gemini.
+const TIMER_NUM_WORD_TABLE: Readonly<Record<string, number>> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+  eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13,
+  fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+  nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60,
+  seventy: 70, eighty: 80, ninety: 90,
+};
+
+const demoParseTimerUtterance = (
+  utterance: string,
+): {
+  action: 'start' | 'none';
+  durationSeconds: number | null;
+  source: 'regex' | 'fallback';
+  confidence: number;
+} => {
+  const text = utterance.toLowerCase();
+  if (/\bquarter\s+hour\b|\ba\s+quarter\s+hour\b/.test(text)) {
+    return { action: 'start', durationSeconds: 900, source: 'regex', confidence: 0.95 };
+  }
+  if (/\bhalf\s+hour\b|\ba\s+half\s+hour\b/.test(text)) {
+    return { action: 'start', durationSeconds: 1800, source: 'regex', confidence: 0.95 };
+  }
+  const numeric = text.match(
+    /\b(\d+(?:\.\d+)?)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)\b/,
+  );
+  if (numeric) {
+    const n = Number(numeric[1]!);
+    const u = numeric[2]!.toLowerCase();
+    const unit: 's' | 'm' | 'h' = u.startsWith('s') || u === 's' ? 's' : u.startsWith('h') || u === 'h' ? 'h' : 'm';
+    const seconds = unit === 's' ? n : unit === 'm' ? n * 60 : n * 3600;
+    return {
+      action: 'start',
+      durationSeconds: Math.min(60 * 60 * 4, Math.max(1, Math.round(seconds))),
+      source: 'regex',
+      confidence: 0.95,
+    };
+  }
+  for (const [word, value] of Object.entries(TIMER_NUM_WORD_TABLE)) {
+    const re = new RegExp(`\\b${word}\\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)\\b`);
+    const m = text.match(re);
+    if (m) {
+      const u = m[1]!.toLowerCase();
+      const unit: 's' | 'm' | 'h' = u.startsWith('s') || u === 's' ? 's' : u.startsWith('h') || u === 'h' ? 'h' : 'm';
+      const seconds = unit === 's' ? value : unit === 'm' ? value * 60 : value * 3600;
+      return {
+        action: 'start',
+        durationSeconds: Math.min(60 * 60 * 4, Math.max(1, Math.round(seconds))),
+        source: 'regex',
+        confidence: 0.9,
+      };
+    }
+  }
+  if (/\ban?\s+hours?\b|\ban?\s+hour\b/.test(text)) {
+    return { action: 'start', durationSeconds: 3600, source: 'regex', confidence: 0.85 };
+  }
+  if (/\ban?\s+minutes?\b|\ban?\s+minute\b/.test(text)) {
+    return { action: 'start', durationSeconds: 60, source: 'regex', confidence: 0.85 };
+  }
+  if (/\ban?\s+seconds?\b|\ban?\s+second\b/.test(text)) {
+    return { action: 'start', durationSeconds: 1, source: 'regex', confidence: 0.85 };
+  }
+  return { action: 'none', durationSeconds: null, source: 'fallback', confidence: 0 };
 };
 
 const flattenStep = (recipe: AgentRecipe, idx: number): StepView => {

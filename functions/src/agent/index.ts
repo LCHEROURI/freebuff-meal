@@ -25,6 +25,7 @@ export {
   endCookingSession,
   extractIngredientsFromSpeech,
   askChef,
+  parseTimerUtterance,
 } from './cookingTools.js';
 
 export { transition, legalTransitions, pausePreservePhase } from './stateMachine.js';

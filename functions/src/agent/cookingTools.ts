@@ -31,6 +31,8 @@ import {
   AskChefRequestSchema,
   AskChefResponseSchema,
   GenerateRecipeResponseSchema,
+  ParseTimerUtteranceRequestSchema,
+  ParseTimerUtteranceResponseSchema,
   StartCookingSessionResponseSchema,
   type AgentIngredient,
   type CookingSession,
@@ -917,4 +919,215 @@ export const askChef = onCall(ALL_TOOL_GUARD, async (req) => {
     questionLen: input.question.length,
   });
   return { ...parsed.data, source: 'fresh' as const };
+});
+
+// =====================================================================
+//  parse_timer_utterance — CookVoiceOverlay "start the timer" path
+//  (PR #22).
+//
+// Push-to-talk transcripts that carry any timer cue ("start the
+// timer", "set 12 minutes", "I'm putting it in the oven now",
+// "thirty seconds", "an hour and a half") land here. The browser
+// already extracts most cases via regex (see
+// `voiceOverlayGrammar.extractTimerFromUtterance`); the LLM is the
+// safety net for ambiguous utterances.
+//
+// Two design choices worth flagging:
+//   1. *Client-side regex FIRST.* The browser calls this onCall
+//      only when its own regex returned `kind:'none'` AND the
+//      utterance carries a timer cue. Most cases never reach
+//      the network.
+//   2. *Strict 96-token cap.* Response is a tiny structured object
+//      ({action, durationSeconds, source, confidence}), so the LLM
+//      is intentionally constrained. End-to-end PTT→action target
+//      is <1.5s (Cloud Function warm + Gemini flash ≈ 400–900ms).
+// =====================================================================
+
+const TIMER_REGEX_NUMWORD: Readonly<Record<string, number>> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+  eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13,
+  fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+  nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60,
+  seventy: 70, eighty: 80, ninety: 90,
+};
+
+const serverParseTimerRegex = (
+  utterance: string,
+): { durationSeconds: number | null; confidence: number } => {
+  const text = utterance.toLowerCase();
+  // Special phrases.
+  if (/\bquarter\s+hour\b|\ba\s+quarter\s+hour\b/.test(text)) {
+    return { durationSeconds: 15 * 60, confidence: 0.95 };
+  }
+  if (/\bhalf\s+hour\b|\ba\s+half\s+hour\b/.test(text)) {
+    return { durationSeconds: 30 * 60, confidence: 0.95 };
+  }
+  // Numeric + unit.
+  const numeric = text.match(
+    /\b(\d+(?:\.\d+)?)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)\b/,
+  );
+  if (numeric) {
+    const n = Number(numeric[1]!);
+    const u = numeric[2]!.toLowerCase();
+    const unit: 's' | 'm' | 'h' = u.startsWith('s') || u === 's'
+      ? 's'
+      : u.startsWith('h') || u === 'h'
+        ? 'h'
+        : 'm';
+    const seconds = unit === 's' ? n : unit === 'm' ? n * 60 : n * 3600;
+    return { durationSeconds: Math.min(60 * 60 * 4, Math.max(1, Math.round(seconds))), confidence: 0.95 };
+  }
+  // Worded numeric + unit.
+  for (const [word, value] of Object.entries(TIMER_REGEX_NUMWORD)) {
+    const re = new RegExp(`\\b${word}\\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)\\b`);
+    const m = text.match(re);
+    if (m) {
+      const u = m[1]!.toLowerCase();
+      const unit: 's' | 'm' | 'h' = u.startsWith('s') || u === 's'
+        ? 's'
+        : u.startsWith('h') || u === 'h'
+          ? 'h'
+          : 'm';
+      const seconds = unit === 's' ? value : unit === 'm' ? value * 60 : value * 3600;
+      return {
+        durationSeconds: Math.min(60 * 60 * 4, Math.max(1, Math.round(seconds))),
+        confidence: 0.9,
+      };
+    }
+  }
+  // "an hour" / "a minute" / "a second" without exact numeric.
+  if (/\ban?\s+hours?\b|\ban?\s+hour\b/.test(text)) {
+    return { durationSeconds: 3600, confidence: 0.85 };
+  }
+  if (/\ban?\s+minutes?\b|\ban?\s+minute\b/.test(text)) {
+    return { durationSeconds: 60, confidence: 0.85 };
+  }
+  if (/\ban?\s+seconds?\b|\ban?\s+second\b/.test(text)) {
+    return { durationSeconds: 1, confidence: 0.85 };
+  }
+  return { durationSeconds: null, confidence: 0 };
+};
+
+const PARSE_TIMER_SYSTEM_PROMPT = `You are a kitchen timer parser. Given a single utterance from a cook, return ONLY a JSON object describing whether they want a timer started and for how long.
+
+Rules (apply strictly):
+1. If the utterance names a specific duration (number + unit, or word-number like "twelve minutes"), emission {action:"start", durationSeconds: <integer>}. Supported units: seconds, minutes, hours. 1 hour = 3600. Convert natural-language fractions: "quarter hour" = 15 minutes, "half hour" = 30 minutes, "an hour and a half" = 90 minutes.
+2. If the utterance implies starting a timer without a duration ("I'm putting it in the oven now", "start cooking", "begin"), return {action:"start", durationSeconds: null}. The caller will fall back to the current step's timerSeconds.
+3. If the utterance is not about starting a timer (a question about ingredients, a navigation command, etc.), return {action:"none", durationSeconds: null}.
+4. Clamp durationSeconds to [1, 14400] (max 4 hours). Round to the nearest integer.
+5. Self-rated confidence: 0.95 when number+unit is unambiguous, 0.7 for implicit, 0 for none.
+6. Return ONLY the JSON. No commentary.`;
+
+const parseTimerCache = new Map<string, { value: z.infer<typeof ParseTimerUtteranceResponseSchema>; insertedAt: number }>();
+const PARSE_TIMER_CACHE_MAX = 100;
+const PARSE_TIMER_CACHE_TTL_MS = 30 * 60 * 1000;
+const readParseTimerCache = (key: string): z.infer<typeof ParseTimerUtteranceResponseSchema> | null => {
+  const e = parseTimerCache.get(key);
+  if (!e) return null;
+  if (Date.now() - e.insertedAt > PARSE_TIMER_CACHE_TTL_MS) {
+    parseTimerCache.delete(key);
+    return null;
+  }
+  return e.value;
+};
+const writeParseTimerCache = (key: string, value: z.infer<typeof ParseTimerUtteranceResponseSchema>): void => {
+  if (parseTimerCache.size >= PARSE_TIMER_CACHE_MAX) {
+    const oldest = parseTimerCache.keys().next().value;
+    if (oldest !== undefined) parseTimerCache.delete(oldest);
+  }
+  parseTimerCache.set(key, { value, insertedAt: Date.now() });
+};
+
+export const parseTimerUtterance = onCall(ALL_TOOL_GUARD, async (req) => {
+  const uid = requireUid(req);
+  const input = ParseTimerUtteranceRequestSchema.parse(req.data);
+
+  // Same permissive session lookup the overlay's `ask_chef` uses.
+  // The CookVoiceOverlay sends synthetic `cookmode:` ids; we accept
+  // and log so analytics can see the overlay path being used.
+  const session = await getSession(uid, input.sessionId);
+  if (!session) {
+    logEvent(input.sessionId, 'AGENT_TOOL_LOG', 'agent', {
+      tool: 'parse_timer_utterance',
+      source: 'overlay',
+      note: 'session-not-found',
+    });
+  }
+
+  // Cache key — same shape as ask_chef.
+  const cacheKey = (input.cacheKey ?? normalizeQuestionForCache(input.utterance)) +
+    '|' + (input.currentStepPhase ?? 'any') + '|timer';
+  const cached = readParseTimerCache(cacheKey);
+  if (cached) {
+    logEvent(input.sessionId, 'AGENT_TOOL_LOG', 'agent', {
+      tool: 'parse_timer_utterance',
+      source: 'cache',
+      cacheKey,
+    });
+    return { ...cached, source: cached.source };
+  }
+
+  // 1. Local regex on the server (defensive — the browser usually
+  //    pre-resolves so this only fires for non-demo or arg-bypass).
+  const regex = serverParseTimerRegex(input.utterance);
+  if (regex.durationSeconds != null) {
+    const result: z.infer<typeof ParseTimerUtteranceResponseSchema> = {
+      action: 'start',
+      durationSeconds: regex.durationSeconds,
+      source: 'regex',
+      confidence: regex.confidence,
+    };
+    writeParseTimerCache(cacheKey, result);
+    logEvent(input.sessionId, 'AGENT_TOOL_LOG', 'agent', {
+      tool: 'parse_timer_utterance',
+      source: 'regex',
+      cacheKey,
+      durationSeconds: result.durationSeconds,
+    });
+    return result;
+  }
+
+  // 2. LLM fallback for ambiguous utterances like "I'm putting it in
+  //    the oven now" or "start cooking".
+  try {
+    const out = await ai.generate({
+      model: gemini20Flash,
+      prompt: `${PARSE_TIMER_SYSTEM_PROMPT}\n\nUTTERANCE: ${input.utterance}`,
+      output: { schema: ParseTimerUtteranceResponseSchema as unknown as z.ZodTypeAny },
+      config: { temperature: 0.1, maxOutputTokens: 96 },
+    });
+    const parsed = ParseTimerUtteranceResponseSchema.safeParse(out.output);
+    if (!parsed.success) {
+      logEvent(input.sessionId, 'ERROR_OCCURRED', 'system', {
+        tool: 'parse_timer_utterance',
+        reason: 'parse_failed',
+      });
+      return {
+        action: 'none' as const,
+        durationSeconds: null,
+        source: 'fallback' as const,
+        confidence: 0,
+      };
+    }
+    writeParseTimerCache(cacheKey, parsed.data);
+    logEvent(input.sessionId, 'AGENT_TOOL_LOG', 'agent', {
+      tool: 'parse_timer_utterance',
+      source: 'llm',
+      cacheKey,
+      durationSeconds: parsed.data.durationSeconds,
+    });
+    return parsed.data;
+  } catch (_err) {
+    void _err;
+    logEvent(input.sessionId, 'ERROR_OCCURRED', 'system', {
+      tool: 'parse_timer_utterance',
+      reason: 'llm_unavailable',
+    });
+    return {
+      action: 'none' as const,
+      durationSeconds: null,
+      source: 'fallback' as const,
+      confidence: 0,
+    };
+  }
 });

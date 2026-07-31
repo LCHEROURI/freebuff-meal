@@ -14,7 +14,9 @@ import { agentClient } from './agentClient';
 import { AnswerLru } from './answerLru';
 import {
   classifyUtterance,
+  extractTimerFromUtterance,
   looksLikeQuestion,
+  looksLikeTimerCommand,
   normalizeQuestion,
   type OverlayIntent,
 } from './voiceOverlayGrammar';
@@ -76,6 +78,22 @@ export type CookVoiceOverlayProps = {
    * stepIndex; this overlay only translates voice → intent.
    */
   onNav: (intent: OverlayIntent) => void;
+  /**
+   * PR #22: cooking-aware voice timers. Called when the cook says
+   * something like "set 12 minutes" → durationSeconds=720, or
+   * "I'm putting it in the oven now" → durationSeconds=currentStep.
+   * timerSeconds (resolved by the host from the current step).
+   * The host is the source of truth for the running timer list; the
+   * overlay just translates voice → action.
+   */
+  onStartTimer: (durationSeconds: number) => void;
+  /**
+   * PR #22: optional fallback used when the utterance implies a
+   * timer without specifying the duration (e.g. "I'm putting it in
+   * the oven now"). CookModePage returns the current step's
+   * `timerSeconds` or null if the step has no suggested duration.
+   */
+  resolveImplicitTimer?: () => number | null;
 };
 
 type FsmState =
@@ -98,6 +116,8 @@ export const CookVoiceOverlay = ({
   isOpen,
   onClose,
   onNav,
+  onStartTimer,
+  resolveImplicitTimer,
 }: CookVoiceOverlayProps): ReactNode | null => {
   const toast = useToast();
   const speech = useSpeechSynthesis();
@@ -335,6 +355,99 @@ export const CookVoiceOverlay = ({
       // interim-watcher effect).
       setRecordedUtterance(raw);
 
+      // ──────────────────────────────────────────────────────────────────
+      //  0. PR #22 — cooking-aware voice timer.
+      //     Triggered BEFORE the nav grammar because the cook saying
+      //     "start the timer" / "set 12 minutes" / "I'm putting it in
+      //     the oven now" is the most time-sensitive path. Routing:
+      //       (a) Client-side regex via `extractTimerFromUtterance()`
+      //           resolves "set 12 minutes" in <1 ms (no LLM roundtrip).
+      //       (b) If the regex returns `kind: 'implicit'`, fall back
+      //           to the host's currentStep.timerSeconds via
+      //           `resolveImplicitTimer()` — covers "I'm putting it in
+      //           the oven now".
+      //       (c) If both regex AND implicit fall short, call the
+      //           parseTimerUtterance onCall (LLM-backed, 96-token cap)
+      //           so ambiguous utterances still resolve.
+      //       (d) Result action "none" → fall through to the existing
+      //           nav/question flow below.
+      // ──────────────────────────────────────────────────────────────────
+      if (looksLikeTimerCommand(raw)) {
+        const timerAck = (seconds: number): string => {
+          const m = Math.round(seconds / 60);
+          return m >= 1
+            ? `Timer set for ${m} ${m === 1 ? 'minute' : 'minutes'}.`
+            : `Timer set for ${seconds} ${seconds === 1 ? 'second' : 'seconds'}.`;
+        };
+        const local = extractTimerFromUtterance(raw);
+        if (local.kind === 'explicit' && local.durationSeconds != null) {
+          onStartTimer(local.durationSeconds);
+          setFsm('OPENING');
+          speech.speak(timerAck(local.durationSeconds), { rate: 0.95 });
+          toast.push({
+            kind: 'success',
+            title: 'Timer started',
+            description: `Cooking-aware: ${local.durationSeconds}s from your voice.`,
+          });
+          return;
+        }
+        if (local.kind === 'implicit') {
+          const fallback = resolveImplicitTimer?.() ?? null;
+          if (fallback && fallback > 0) {
+            onStartTimer(fallback);
+            setFsm('OPENING');
+            speech.speak(timerAck(fallback), { rate: 0.95 });
+            toast.push({
+              kind: 'success',
+              title: 'Step timer started',
+              description: `Duration ${fallback}s pulled from the current step.`,
+            });
+            return;
+          }
+        }
+        // Both client-side paths missed. Ask the LLM-backed onCall so
+        // ambiguous utterances ("cook for about 12 ish minutes") still
+        // resolve. Single roundtrip; cap 96 tokens on the server.
+        try {
+          const reply = await agentClient.parseTimerUtterance({
+            sessionId,
+            utterance: raw,
+            currentStepPhase: currentStep?.phase,
+          });
+          if (reply.action === 'start' && reply.durationSeconds != null) {
+            onStartTimer(reply.durationSeconds);
+            setFsm('OPENING');
+            speech.speak(timerAck(reply.durationSeconds), { rate: 0.95 });
+            toast.push({
+              kind: 'success',
+              title: 'Timer started',
+              description: `LLM-extracted ${reply.durationSeconds}s (source: ${reply.source}).`,
+            });
+            return;
+          }
+          if (reply.action === 'start' && reply.durationSeconds == null) {
+            const fallback = resolveImplicitTimer?.() ?? null;
+            if (fallback && fallback > 0) {
+              onStartTimer(fallback);
+              setFsm('OPENING');
+              speech.speak(timerAck(fallback), { rate: 0.95 });
+              toast.push({
+                kind: 'info',
+                title: 'Step timer started',
+                description: `LLM said start (no duration) — used the step's ${fallback}s.`,
+              });
+              return;
+            }
+          }
+          // Fall through to nav / question routing.
+        } catch (err) {
+          // Don't block on cloud errors — fall through to noise / nav.
+          // Capture the error so the cook hears something rather than
+          // nothing if every downstream route also misses.
+          console.warn('[cook-voice-overlay] parseTimerUtterance failed', err);
+        }
+      }
+
       // 1. Question-shape check FIRST. An utterance like "how do I know
       //    when the chicken is done" contains the substring "done" and
       //    would otherwise false-match the nav grammar. Routing questions
@@ -406,7 +519,17 @@ export const CookVoiceOverlay = ({
         setFsm('OPENING'); // re-prompt via startMic.
       }
     },
-    [currentStep, onClose, onNav, recipeName, sessionId, speech, toast],
+    [
+      currentStep,
+      onClose,
+      onNav,
+      onStartTimer,
+      recipeName,
+      resolveImplicitTimer,
+      sessionId,
+      speech,
+      toast,
+    ],
   );
 
   if (!isOpen) return null;

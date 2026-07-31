@@ -287,6 +287,33 @@ export const CookModePage = () => {
     setShowManualPicker(false);
   }, [stepIndex, manualDurationMin]);
 
+  // PR #22: voice-driven timer callbacks. The CookVoiceOverlay calls
+  // `onStartTimer(durationSeconds)` whenever an utterance resolves to
+  // a timer action — durationSeconds comes either from the cook's
+  // explicit utterance ("set 12 minutes" → 720) or from the current
+  // step's `durationSeconds` for implicit cues ("I'm putting it in
+  // the oven now"). ResolveImplicitTimer covers the latter.
+  const onStartTimer = useCallback((durationSeconds: number) => {
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return;
+    setActiveTimer({
+      stepGlobalIndex: stepIndex,
+      startedAt: Date.now(),
+      durationMs: Math.round(durationSeconds) * 1000,
+    });
+    setShowManualPicker(false);
+    const mins = Math.round(durationSeconds / 60);
+    setStatusMsg(
+      mins >= 1
+        ? `Voice: started a ${mins}-minute timer.`
+        : `Voice: started a ${Math.round(durationSeconds)}-second timer.`,
+    );
+  }, [stepIndex]);
+
+  const resolveImplicitTimer = useCallback((): number | null => {
+    const dur = steps[stepIndex]?.durationSeconds;
+    return typeof dur === 'number' && dur > 0 ? dur : null;
+  }, [steps, stepIndex]);
+
   const repeatCurrent = useCallback(() => {
     const step = steps[stepIndex];
     if (!step) return;
@@ -468,6 +495,8 @@ export const CookModePage = () => {
               onClick={() => startStepTimer(stepIndex)}
               leftIcon={<Timer size={14} aria-hidden="true" />}
               disabled={isTimerForCurrentStep && remainingMs > 0}
+              title={`Tap to start, or say "start the timer" / "set ${Math.round(step.durationSeconds / 60)} minutes"`}
+              data-testid="start-step-timer-button"
             >
               Start {Math.round(step.durationSeconds / 60)}-min timer
             </Button>
@@ -477,6 +506,8 @@ export const CookModePage = () => {
               variant="secondary"
               onClick={() => setShowManualPicker((s) => !s)}
               leftIcon={<Timer size={14} aria-hidden="true" />}
+              title={'Tap to enter minutes, or say "set N minutes"'}
+              data-testid="set-custom-timer-button"
             >
               Set a timer
             </Button>
@@ -668,6 +699,8 @@ export const CookModePage = () => {
             if (intent === 'nav:stop-listening') return;
             handleIntent(intent.replace(/^nav:/, '') as CookModeIntent);
           }}
+          onStartTimer={onStartTimer}
+          resolveImplicitTimer={resolveImplicitTimer}
         />
       )}
     </div>
