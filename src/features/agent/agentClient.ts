@@ -25,6 +25,7 @@ import type {
   AgentIngredient,
   CookingSession,
   CookingSessionPhase,
+  PantryItem,
 } from './agentTypes';
 
 export type AgentRecipe = {
@@ -275,6 +276,52 @@ export const agentClient = {
         confidence: number;
       }
     >('parseTimerUtterance', args),
+
+  /** PR #43 — ambient voice pantry. Bulk-upsert a batch of items
+   *  (typically the result of `extractIngredientsFromSpeech`) into
+   *  the user's persistent pantry. Firebase path hits
+   *  `addPantryItems`; demo path is localStorage backed with the
+   *  same return shape. */
+  addPantryItems: (args: {
+    items: Array<{
+      name: string;
+      quantity: number | null;
+      unit: string | null;
+      condition: PantryItem['condition'];
+      confidence: number;
+      note?: string | null;
+    }>;
+    source?: 'voice' | 'manual';
+  }) =>
+    callTool<typeof args, {
+      items: PantryItem[];
+      savedAt: string;
+    }>('addPantryItems', args),
+
+  /** Server-side bulk read; the client mostly uses the `onSnapshot`
+   *  listener for live updates, but a one-shot read is useful when
+   *  migrating an unsigned-in session to a signed-in account. */
+  listPantryItems: (args?: { limit?: number }) =>
+    callTool<
+      { limit?: number } | undefined,
+      { items: PantryItem[]; fetchedAt: string }
+    >('listPantryItems', args),
+
+  /** Single-item removal (UI "remove this chip" path on PantryStrip). */
+  removePantryItem: (args: { itemId: string }) =>
+    callTool<typeof args, { itemId: string; removedAt: string }>(
+      'removePantryItem',
+      args,
+    ),
+
+  /** Called client-side after a successful plan save. Bumps
+   *  `timesUsed` + `lastUsedAt` on every pantry row whose
+   *  `normalizedName` matches one of the recipe's ingredient names. */
+  markPantryItemsUsed: (args: { ingredientNames: string[] }) =>
+    callTool<typeof args, { matched: number; touchedAt: string }>(
+      'markPantryItemsUsed',
+      args,
+    ),
 };
 
 // =====================================================================
@@ -662,6 +709,104 @@ const localDemoAgent = {
     void args;
     return demoParseTimerUtterance(args.utterance);
   },
+
+  // PR #43 — localStorage-backed pantry. Identical shape to the
+  // Firebase path so the strip + mic button work identically in
+  // demo mode. `storage` events keep cross-tab demo session in
+  // sync, mirroring what a real Firestore listener would do.
+  addPantryItems: (args: {
+    items: Array<{
+      name: string;
+      quantity: number | null;
+      unit: string | null;
+      condition: PantryItem['condition'];
+      confidence: number;
+      note?: string | null;
+    }>;
+    source?: 'voice' | 'manual';
+  }) => {
+    const uid = 'demo-user';
+    const savedAt = nowIso();
+    const existing = readDemoPantry(uid);
+    const out: PantryItem[] = [];
+    for (const partial of args.items) {
+      const normalizedName = normalizePantryNameLocal(partial.name);
+      const dedupeHit = existing.find(
+        (p) =>
+          p.normalizedName === normalizedName &&
+          p.condition === partial.condition,
+      );
+      if (dedupeHit) {
+        const updated: PantryItem = {
+          ...dedupeHit,
+          name: partial.name,
+          quantity: partial.quantity ?? dedupeHit.quantity,
+          unit: partial.unit ?? dedupeHit.unit,
+          confidence: Math.max(partial.confidence, dedupeHit.confidence),
+          note: partial.note ?? dedupeHit.note,
+        };
+        out.push(updated);
+        existing[existing.indexOf(dedupeHit)] = updated;
+        continue;
+      }
+      const fresh: PantryItem = {
+        id: `pantry_${Math.random().toString(36).slice(2, 10)}`,
+        ownerId: uid,
+        name: partial.name,
+        normalizedName,
+        quantity: partial.quantity,
+        unit: partial.unit,
+        condition: partial.condition,
+        source: args.source ?? 'voice',
+        confidence: partial.confidence,
+        addedAt: savedAt,
+        lastUsedAt: null,
+        timesUsed: 0,
+        note: partial.note ?? null,
+      };
+      out.push(fresh);
+      existing.unshift(fresh);
+    }
+    writeDemoPantry(uid, existing);
+    return { items: out, savedAt };
+  },
+
+  listPantryItems: (args?: { limit?: number }) => {
+    const uid = 'demo-user';
+    const items = readDemoPantry(uid).slice(0, args?.limit ?? 50);
+    return { items, fetchedAt: nowIso() };
+  },
+
+  removePantryItem: (args: { itemId: string }) => {
+    const uid = 'demo-user';
+    const existing = readDemoPantry(uid);
+    const next = existing.filter((p) => p.id !== args.itemId);
+    writeDemoPantry(uid, next);
+    return { itemId: args.itemId, removedAt: nowIso() };
+  },
+
+  markPantryItemsUsed: (args: { ingredientNames: string[] }) => {
+    const uid = 'demo-user';
+    const existing = readDemoPantry(uid);
+    const normalized = args.ingredientNames
+      .map((n) => n.toLowerCase().trim())
+      .filter(Boolean);
+    let matched = 0;
+    const now = nowIso();
+    const next = existing.map((p) => {
+      const hit = normalized.some(
+        (n) =>
+          p.normalizedName === n ||
+          p.normalizedName.includes(n) ||
+          n.includes(p.normalizedName),
+      );
+      if (!hit) return p;
+      matched += 1;
+      return { ...p, timesUsed: p.timesUsed + 1, lastUsedAt: now };
+    });
+    writeDemoPantry(uid, next);
+    return { matched, touchedAt: now };
+  },
 };
 
 /**
@@ -916,3 +1061,39 @@ const heuristicExtract = (utterance: string): AgentIngredient[] => {
   }
   return out;
 };
+
+// PR #43 — localStorage bridge for the pantry. Used by the demo
+// agent only; the Firebase path uses the real Firestore listener.
+// `localDemoAgent.listPantryItems` reads from a per-uid key so the
+// demo user has the same multi-user isolation contract as Firebase.
+const pantryKey = (uid: string): string => `freebuff:pantry:${uid}`;
+const readDemoPantry = (uid: string): PantryItem[] => {
+  try {
+    const raw = window.localStorage.getItem(pantryKey(uid));
+    if (!raw) return [];
+    return JSON.parse(raw) as PantryItem[];
+  } catch {
+    return [];
+  }
+};
+const writeDemoPantry = (uid: string, items: PantryItem[]): void => {
+  try {
+    window.localStorage.setItem(pantryKey(uid), JSON.stringify(items));
+    // Cross-tab sync: a sibling tab listening on `storage` will
+    // pick this up just like a Firestore onSnapshot would.
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: pantryKey(uid),
+        newValue: JSON.stringify(items),
+      }),
+    );
+  } catch {
+    // localStorage quota or disabled — best-effort.
+  }
+};
+const normalizePantryNameLocal = (raw: string): string =>
+  raw
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();

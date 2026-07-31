@@ -117,6 +117,22 @@ service cloud.firestore {
       }
     }
 
+    // --- Per-user pantry items (PR #43, ambient voice pantry).
+    //     Flat collection of `{name, quantity, condition, ...}`. Owner can
+    //     read their own. Writes are server-only: the canonical write path
+    //     is the `addPantryItems` onCall, which uses the Admin SDK and
+    //     bypasses rules. The onSnapshot listener on the client reads via
+    //     the user's own token.
+    match /pantryItems/{itemId} {
+      allow read: if isAuthed()
+        && resource.data.ownerId == request.auth.uid;
+      // Establish dedupeKey server-side mirror so the Admin-SDK path can
+      // match against it without paying a normalizedName recompute. The
+      // client never builds this directly (defense in depth: refuse any
+      // client-side write through this rule path).
+      allow create, update, delete: if false;
+    }
+
     // Catch-all
     match /{document=**} {
       allow read, write: if false;

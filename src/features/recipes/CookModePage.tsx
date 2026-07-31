@@ -21,6 +21,8 @@ import {
   type CookModeIntent,
 } from '@/components/common/VoiceCommandListener';
 import { CookVoiceOverlay, type CookVoiceStep } from '@/features/agent/CookVoiceOverlay';
+import { PantryMicButton } from '@/features/agent/PantryMicButton';
+import { PantryStrip } from '@/features/agent/PantryStrip';
 import { ensureProfile } from '@/utils/demoAdapter';
 import type { EmbeddedRecipe } from '@/schemas/mealPlan';
 import type { Recipe, RecipeStep } from '@/schemas/recipe';
@@ -177,6 +179,9 @@ export const CookModePage = () => {
   const [voiceOverlayOpen, setVoiceOverlayOpen] = useState<boolean>(false);
   const cookWithMeProfile = user ? ensureProfile(user.uid) : null;
   const cookWithMeEnabled = cookWithMeProfile?.cookVoiceOverlayEnabled ?? false;
+  // PR #43: ambient voice pantry — distinct opt-in from Cook Mode overlay
+  // because the lifecycles differ (input vs read-aloud).
+  const pantryVoiceEnabled = cookWithMeProfile?.pantryVoiceEnabled ?? false;
 
   const tickRef = useRef<number | null>(null);
   const [now, setNow] = useState<number>(Date.now());
@@ -467,6 +472,21 @@ export const CookModePage = () => {
           )}
         </div>
       </header>
+
+      {/* PR #43 — ambient voice pantry (CookModePage mount). Compact
+          strip + mic button below the header so the cook's adding-during-
+          cooking flow is one tap away from the step card. */}
+      {pantryVoiceEnabled && (
+        <div
+          className="mt-3 rounded-lg border border-butter-300 bg-butter-50 p-3"
+          data-testid="cook-mode-pantry-card"
+        >
+          <PantryMicButton uid={user?.uid ?? null} />
+          <div className="mt-3">
+            <PantryStrip uid={user?.uid ?? null} />
+          </div>
+        </div>
+      )}
 
       {/* Current step — big card, mobile-friendly, hands-busy first. */}
       <Card className="mt-4" key={stepIndex}>

@@ -339,6 +339,10 @@ export const TOOL_NAMES = [
   'end_cooking_session',
   'ask_chef', // CookVoiceOverlay conversational tip loop (PR #15).
   'parse_timer_utterance', // CookVoiceOverlay timer-conversation loop (PR #22).
+  'add_pantry_items', // Ambient voice pantry intake (PR #43).
+  'list_pantry_items', // Read cooker's persisted pantry items.
+  'remove_pantry_item', // Explicit single-item removal.
+  'mark_pantry_items_used', // Bump usage counters when a plan consumes items (PR #43).
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 

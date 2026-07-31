@@ -62,3 +62,24 @@ export type CookingSession = {
   completedAt: string | null;
   previousPhaseBeforePause: CookingSessionPhase | null;
 };
+
+/** PR #43 — mirror of `src/schemas/pantry.ts` `PantryItemSchema`.
+ *  Identity = `(ownerId, normalizedName, condition)`. The cook's
+ *  ambient voice pantry is the long-term memory that the MealPlan
+ *  generator reads from when building future weeks. */
+export type PantryItem = {
+  id: string;
+  ownerId: string;
+  name: string;
+  normalizedName: string;
+  quantity: number | null;
+  unit: string | null;
+  condition: 'fresh' | 'frozen' | 'cooked' | 'leftover' | 'canned' | 'dried' | 'other' | null;
+  source: 'voice' | 'manual' | 'recipe_consumed';
+  confidence: number;
+  addedAt: string;
+  lastUsedAt: string | null;
+  timesUsed: number;
+  note: string | null;
+};
+

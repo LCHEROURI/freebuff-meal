@@ -173,5 +173,21 @@ export const usePlanService = () => {
         excludedIngredients: string[];
       },
     ) => regenerateRecipe(planId, recipeId, reason, detail, lockList, profile),
+    /**
+     * PR #43 — async best-effort bump of pantry usage counters
+     * after a successful plan generation. Resolves locally even
+     * when the network call fails so the cook never sees a
+     * blocked "save" because the pantry write missed.
+     */
+    markPantryItemsUsed: async (ingredientNames: string[]) => {
+      try {
+        if (ingredientNames.length === 0) return { matched: 0 };
+        const mod = await import('@/features/agent/agentClient');
+        return await mod.agentClient.markPantryItemsUsed({ ingredientNames });
+      } catch (err) {
+        void err; // swallowed: best-effort, never block plan generation
+        return { matched: 0 };
+      }
+    },
   };
 };

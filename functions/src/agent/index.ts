@@ -28,5 +28,12 @@ export {
   parseTimerUtterance,
 } from './cookingTools.js';
 
+export {
+  addPantryItems,
+  listPantryItems,
+  removePantryItem,
+  markPantryItemsUsed,
+} from './pantryTools.js';
+
 export { transition, legalTransitions, pausePreservePhase } from './stateMachine.js';
 export type { SessionTrigger } from './stateMachine.js';

@@ -22,6 +22,9 @@ import {
 } from '@/features/settings/categories';
 import { usePlanService } from './mealPlanService';
 import { GenerationProgress } from './GenerationProgress';
+import { PantryMicButton } from '@/features/agent/PantryMicButton';
+import { PantryStrip } from '@/features/agent/PantryStrip';
+import { usePantryItems } from '@/hooks/usePantryItems';
 
 const PROTEINS = ['chicken', 'beef', 'pork', 'fish', 'tofu', 'eggs', 'lentils', 'chickpeas'];
 
@@ -36,6 +39,27 @@ export const NewPlanPage = () => {
   const [generating, setGenerating] = useState(false);
 
   const profile = user ? ensureProfile(user.uid) : null;
+  const { items: pantryItems } = usePantryItems(user?.uid ?? null);
+  const onUsePantryFromStrip = () => {
+    if (pantryItems.length === 0) return;
+    const names = pantryItems.map((p) => p.name);
+    // The form's `pantryIngredients` is `string[]` per the schema; the
+    // comma-joined display is rendered by the Input component. We
+    // dedupe against whatever the user has typed so a fresh "Use
+    // pantry (5)" tap doesn't double-count items already typed in.
+    const current = Array.isArray(values.pantryIngredients)
+      ? (values.pantryIngredients as string[])
+      : ((values.pantryIngredients ?? '') as string)
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+    const merged = Array.from(new Set([...current, ...names]));
+    setValue('pantryIngredients', merged, { shouldDirty: true });
+    toast.push({
+      kind: 'success',
+      title: `Using ${names.length} pantry item${names.length === 1 ? '' : 's'}`,
+    });
+  };
   // The Settings `defaultPlanLength` is now `number` (int 1..7), but the
   // AI plan-record schema still restricts `planLength` to literal 3|5|7.
   // This is a deliberately half-finished widening — Settings accepts the
@@ -121,6 +145,12 @@ export const NewPlanPage = () => {
     try {
       setGenerating(true);
       const recipes = await planService.generatePlan(input);
+      // PR #43 — bump pantry usage counters for every ingredient name
+      // the plan actually consumed. Best-effort: a network blip on
+      // this call should NOT block the cook from seeing their plan.
+      void planService.markPantryItemsUsed(
+        recipes.flatMap((r) => r.ingredients.map((i) => i.name)),
+      );
       const id = `plan-${Date.now().toString(36)}`;
       const plan: DemoMealPlan = {
         id,
@@ -293,13 +323,37 @@ export const NewPlanPage = () => {
         </SectionCard>
 
         <SectionCard title="Pantry and skill">
+          {/* PR #43 — wizard idle state surfaces the ambient pantry
+              strip directly above the existing pantryIngredients field
+              so the cook sees "yes, you already have chicken, garbanzo,
+              and a thing of garlic" *next to* the comma-separated text
+              field those names auto-fill. No visual contradiction. */}
+          <PantryMicButton uid={user?.uid ?? null} className="mb-2" />
+          <div className="mb-4">
+            <PantryStrip uid={user?.uid ?? null} />
+          </div>
           <div className="grid gap-4 sm:grid-cols-3">
-            <Input
-              label="Pantry ingredients (comma-separated)"
-              placeholder="e.g. canned tomatoes, rice, chickpeas"
-              rightIcon={<VoiceInputButton />}
-              {...register('pantryIngredients')}
-            />
+            <div>
+              <Input
+                label="Pantry ingredients (auto-filled from voice pantry above)"
+                placeholder="chicken, garbanzo, garlic, ..."
+                rightIcon={<VoiceInputButton />}
+                {...register('pantryIngredients')}
+              />
+              <button
+                type="button"
+                className="mt-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-basil-700 hover:bg-basil-50 disabled:opacity-50"
+                disabled={pantryItems.length === 0}
+                onClick={onUsePantryFromStrip}
+                title={
+                  pantryItems.length > 0
+                    ? `Auto-fill with ${pantryItems.length} pantry item${pantryItems.length === 1 ? '' : 's'}`
+                    : 'Add items to your pantry first'
+                }
+              >
+                Use pantry ({pantryItems.length})
+              </button>
+            </div>
             <Input
               label="Use soon (comma-separated)"
               placeholder="e.g. spinach, ripe tomatoes"
