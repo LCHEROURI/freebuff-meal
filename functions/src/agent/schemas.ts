@@ -337,5 +337,33 @@ export const TOOL_NAMES = [
   'pause_cooking_session',
   'resume_cooking_session',
   'end_cooking_session',
+  'ask_chef', // CookVoiceOverlay conversational tip loop (PR #15).
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
+
+/** ----------------------------------------------------------------
+ *  ask_chef — CookVoiceOverlay conversational tip loop
+ *  ---------------------------------------------------------------*/
+export const AskChefRequestSchema = z.object({
+  sessionId: z.string().min(1).max(80),
+  question: z.string().min(3).max(400),
+  /** Client-side normalized cache key. The server does NOT trust it
+   *  for anything other than logging — it re-normalizes for its
+   *  in-process cache. Gracefully degenerates to a non-cached call
+   *  when missing. */
+  cacheKey: z.string().min(1).max(120).optional(),
+  currentStepText: z.string().max(600).optional(),
+  currentStepPhase: z.enum(['preparation', 'cooking', 'presentation']).optional(),
+  currentStepNumber: z.number().int().positive().optional(),
+  recipeName: z.string().min(1).max(120).optional(),
+});
+export const AskChefResponseSchema = z.object({
+  answer: z.string().min(1).max(420),
+  source: z.enum(['fresh', 'cache']),
+  /** Free-form hint for the client (e.g. "consider start_timer" /
+   *  "consider substitute"). The UI surfaces it as a soft suggestion
+   *  chip — does NOT auto-trigger tool calls. */
+  followUp: z.string().nullable().default(null),
+});
+export type AskChefRequest = z.infer<typeof AskChefRequestSchema>;
+export type AskChefResponse = z.infer<typeof AskChefResponseSchema>;

@@ -232,6 +232,28 @@ export const agentClient = {
       'extractIngredientsFromSpeech',
       { utterance },
     ),
+
+  /** CookVoiceOverlay conversational tip loop (PR #15).
+   *  Same shape in both modes — a deterministic cache key + per-mode
+   *  resolution (demo = hand-curated keyword dictionary; Firebase =
+   *  ask_chef onCall with server-side LRU). */
+  askChef: (args: {
+    sessionId: string;
+    question: string;
+    recipeName?: string;
+    currentStepText?: string;
+    currentStepPhase?: 'preparation' | 'cooking' | 'presentation';
+    currentStepNumber?: number;
+    cacheKey?: string;
+  }) =>
+    callTool<
+      typeof args,
+      {
+        answer: string;
+        source: 'fresh' | 'cache';
+        followUp: string | null;
+      }
+    >('askChef', args),
 };
 
 // =====================================================================
@@ -585,6 +607,113 @@ const localDemoAgent = {
       warnings: ['Demo mode uses a heuristic — real extraction uses Gemini.'],
     };
   },
+
+  askChef: (args: {
+    sessionId: string;
+    question: string;
+    recipeName?: string;
+    currentStepText?: string;
+    currentStepPhase?: 'preparation' | 'cooking' | 'presentation';
+    currentStepNumber?: number;
+    cacheKey?: string;
+  }) => {
+    // Demo mode is O(1) pure and stateless: the keyword dictionary
+    // is consulted on every call. There's no LRU to look up against,
+    // so computing a synthetic cache key here would only add ceremony.
+    // The Firebase path uses the LRU; demo path skips it.
+    void args;
+    return {
+      answer: demoAskChefLookup(args.question, args.currentStepText),
+      source: 'fresh' as const,
+      followUp: null,
+    };
+  },
+};
+
+/**
+ * Tiny demo-mode keyword → answer dictionary. Each entry is a small
+ * set of cue phrases keyed on a single canned reply. The lookup is
+ * intentionally cheap: pure substring match against the lowercased
+ * utterance. The cook in demo mode gets a sensible, non-robotic
+ * answer; in production, this path is bypassed by the real Gemini
+ * call inside the ask_chef onCall.
+ *
+ * Listed in order — earlier entries win on tie, which is why safety
+ * cues (doneness for chicken, beef, pork) appear before generic
+ * substitution / "how do I" cues.
+ */
+const DEMO_ASK_CHEF_ENTRIES: ReadonlyArray<{
+  cues: ReadonlyArray<string>;
+  reply: string;
+}> = [
+  {
+    cues: ['chicken', 'done', 'internal', 'temperature'],
+    reply: 'Cook the chicken to 165°F internal temperature. The juices should run clear, not pink.',
+  },
+  {
+    cues: ['beef', 'steak', 'medium'],
+    reply: 'For medium beef, aim for 145°F internal. Let it rest for 5 minutes before slicing.',
+  },
+  {
+    cues: ['pork', 'done'],
+    reply: 'Pork is safe at 145°F internal with a 3-min rest. It can stay a little pink in the middle.',
+  },
+  {
+    cues: ['fish', 'flake'],
+    reply: 'Fish is done when it flakes easily with a fork and reads 145°F internal.',
+  },
+  {
+    cues: ['substitute', 'lemon'],
+    reply: 'Try 1 to 2 teaspoons of lime juice plus a pinch of sugar. Or use apple cider vinegar in a smaller amount.',
+  },
+  {
+    cues: ['substitute', 'garlic'],
+    reply: 'Use 1/8 teaspoon garlic powder per clove called for, or a small pinch of granulated garlic.',
+  },
+  {
+    cues: ['substitute', 'butter'],
+    reply: 'Use the same amount of olive oil, or for baking try coconut oil at a 1 to 1 ratio.',
+  },
+  {
+    cues: ['substitute', 'parsley'],
+    reply: 'Try equal amounts of fresh cilantro, chives, or a teaspoon of dried parsley.',
+  },
+  {
+    cues: ['substitute', 'soy sauce'],
+    reply: 'Use tamari (gluten-free) or coconut aminos at a 1 to 1 ratio. Add a touch more salt if needed.',
+  },
+  {
+    cues: ['substitute', 'wine'],
+    reply: 'Use the same amount of chicken or vegetable broth plus a teaspoon of lemon juice or vinegar.',
+  },
+  {
+    cues: ['thick', 'sauce'],
+    reply: 'Whisk a teaspoon of cornstarch with 2 teaspoons of cold water, then stir in and simmer 1 minute.',
+  },
+  {
+    cues: ['salty', 'too salty'],
+    reply: 'Add a splash of acid (lemon or vinegar) and a small potato piece; remove the potato after 10 minutes.',
+  },
+  {
+    cues: ['spicy', 'too spicy'],
+    reply: 'Add a spoonful of dairy — yogurt, sour cream, or coconut milk — plus a pinch of sugar.',
+  },
+];
+
+const demoAskChefLookup = (
+  question: string,
+  stepText: string | undefined,
+): string => {
+  const text = ` ${question.toLowerCase()} `;
+  for (const entry of DEMO_ASK_CHEF_ENTRIES) {
+    if (entry.cues.every((cue) => text.includes(cue))) return entry.reply;
+  }
+  // Generic fallback that quotes the current step so the cook never
+  // hears a void. Better than silence.
+  if (stepText) {
+    return `I see you're following: ${stepText.slice(0, 80)}. Take it one step at a time.`;
+  }
+  return "I'm in demo mode right now — the full sous-chef needs a Firebase project to answer that.";
 };
 
 const flattenStep = (recipe: AgentRecipe, idx: number): StepView => {

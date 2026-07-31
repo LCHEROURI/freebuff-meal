@@ -277,6 +277,31 @@ export const SettingsPage = () => {
               <option value="splurge">Splurge</option>
             </Select>
           </div>
+
+          {/* PR #15: opt-in toggle for the cook-with-me voice overlay.
+              Defaults to false in the schema — added here so the user
+              statement "it just talks at me" has a single, discoverable
+              switch instead of a hidden flag. */}
+          <div className="col-span-full mt-4 rounded-lg border border-basil-200 bg-basil-50 p-3">
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                className="mt-1"
+                {...register('cookVoiceOverlayEnabled')}
+              />
+              <span>
+                <span className="text-sm font-medium text-basil-900">
+                  Enable hands-free voice mode in Cook Mode
+                </span>
+                <span className="mt-1 block text-xs text-ink-700">
+                  When this is on, a "Cook with me" button appears on each recipe in
+                  Cook Mode. Hold to talk to ask questions ("how do I know the
+                  chicken is done?") or say step commands. Off by default so a
+                  kitchen conversation isn't interrupted by a robotic voice.
+                </span>
+              </span>
+            </label>
+          </div>
         </SectionCard>
 
         <SectionCard title="Diet & allergens">

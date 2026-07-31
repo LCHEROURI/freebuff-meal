@@ -20,6 +20,8 @@ import {
   VoiceCommandListener,
   type CookModeIntent,
 } from '@/components/common/VoiceCommandListener';
+import { CookVoiceOverlay, type CookVoiceStep } from '@/features/agent/CookVoiceOverlay';
+import { ensureProfile } from '@/utils/demoAdapter';
 import type { EmbeddedRecipe } from '@/schemas/mealPlan';
 import type { Recipe, RecipeStep } from '@/schemas/recipe';
 
@@ -171,6 +173,10 @@ export const CookModePage = () => {
   const [manualDurationMin, setManualDurationMin] = useState<number>(5);
   const [showManualPicker, setShowManualPicker] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string>('');
+  // PR #15: opt-in push-to-talk overlay for hands-free cooking.
+  const [voiceOverlayOpen, setVoiceOverlayOpen] = useState<boolean>(false);
+  const cookWithMeProfile = user ? ensureProfile(user.uid) : null;
+  const cookWithMeEnabled = cookWithMeProfile?.cookVoiceOverlayEnabled ?? false;
 
   const tickRef = useRef<number | null>(null);
   const [now, setNow] = useState<number>(Date.now());
@@ -204,6 +210,19 @@ export const CookModePage = () => {
     if (steps.length === 0) return;
     saveStored(recipeId, { stepIndex, voiceEnabled, ttsEnabled });
   }, [recipeId, stepIndex, voiceEnabled, ttsEnabled, steps.length]);
+
+  // PR #15: derive a CookVoiceStep from the current linear step. Lives
+  // in the render scope so the overlay sees fresh `text` / `phase` on
+  // every step change.
+  const currentOverlayStep: CookVoiceStep | null =
+    steps.length === 0
+      ? null
+      : {
+          stepNumber: (steps[stepIndex]?.order ?? stepIndex + 1),
+          phase: (steps[stepIndex]?.phase ?? 'cooking') as CookVoiceStep['phase'],
+          text: steps[stepIndex]?.text ?? '',
+          spokenText: steps[stepIndex]?.text ?? '',
+        };
 
   // 4. Drive the timer countdown ticker.
   useEffect(() => {
@@ -408,6 +427,17 @@ export const CookModePage = () => {
           >
             {voiceEnabled ? 'Voice: on' : 'Voice: off'}
           </Button>
+          {cookWithMeEnabled && recipe && plan && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setVoiceOverlayOpen(true)}
+              title="Open hands-free voice mode"
+              data-testid="open-cook-voice-overlay"
+            >
+              Cook with me
+            </Button>
+          )}
         </div>
       </header>
 
@@ -617,6 +647,29 @@ export const CookModePage = () => {
       >
         Copy recipe link
       </Button>
+
+      {/* PR #15: hands-free voice mode overlay, opt-in via the Settings
+          page (`cookVoiceOverlayEnabled`). The overlay is mounted ON
+          DEMAND — keeping the page light when the cook is reading
+          normally. The intent→CookModeIntent adapter is tiny because
+          the existing handleIntent() already drives stepIndex, timers,
+          and TTS. */}
+      {voiceOverlayOpen && recipe && currentOverlayStep && (
+        <CookVoiceOverlay
+          sessionId={`cookmode:${plan?.id ?? 'local'}:${recipe.id}`}
+          recipeName={recipe.name}
+          currentStep={currentOverlayStep}
+          isOpen={voiceOverlayOpen}
+          onClose={() => setVoiceOverlayOpen(false)}
+          onNav={(intent) => {
+            // Intent equality mirrors `CookModeIntent` strings (1:1) so
+            // we can cast safely. `stop-listening` is handled inside the
+            // overlay itself (closes; never returns here).
+            if (intent === 'nav:stop-listening') return;
+            handleIntent(intent.replace(/^nav:/, '') as CookModeIntent);
+          }}
+        />
+      )}
     </div>
   );
 };

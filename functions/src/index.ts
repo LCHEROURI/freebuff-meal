@@ -32,6 +32,7 @@ import {
   resumeCookingSession,
   endCookingSession,
   extractIngredientsFromSpeech,
+  askChef,
 } from './agent/index.js';
 
 export const ai = genkit({
@@ -61,4 +62,5 @@ export {
   resumeCookingSession,
   endCookingSession,
   extractIngredientsFromSpeech,
+  askChef,
 };

@@ -24,6 +24,7 @@ export {
   resumeCookingSession,
   endCookingSession,
   extractIngredientsFromSpeech,
+  askChef,
 } from './cookingTools.js';
 
 export { transition, legalTransitions, pausePreservePhase } from './stateMachine.js';

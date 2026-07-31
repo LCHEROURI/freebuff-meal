@@ -35,6 +35,12 @@ export const UserProfileSchema = z.object({
   measurementSystem: z.enum(['metric', 'imperial']).default('metric'),
   timezone: z.string().default('UTC'),
   onboardingCompleted: z.boolean().default(false),
+  /**
+   * Opt-in toggle for the hands-free Voice Mode overlay that mounts on top
+   * of Cook Mode. Defaults to false: people cooking with family / kids /
+   * a podcast playing rarely want the agent reading steps aloud.
+   */
+  cookVoiceOverlayEnabled: z.boolean().default(false),
 });
 export type UserProfile = z.infer<typeof UserProfileSchema>;
 

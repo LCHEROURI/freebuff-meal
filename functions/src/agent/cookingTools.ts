@@ -28,6 +28,8 @@ import { MealPlanSchema } from '../ai/schemas/mealPlan.js';
 
 import {
   AgentIngredientSchema,
+  AskChefRequestSchema,
+  AskChefResponseSchema,
   GenerateRecipeResponseSchema,
   StartCookingSessionResponseSchema,
   type AgentIngredient,
@@ -770,4 +772,149 @@ export const endCookingSession = onCall(ALL_TOOL_GUARD, async (req) => {
     {},
   );
   return { session: updated };
+});
+
+// =====================================================================
+//  ask_chef — CookVoiceOverlay conversational tip loop (PR #15)
+//
+// Server-side counter-part to the browser's `useSpeechDictation`
+// utterance flow. Push-to-talk transcripts that survive the local
+// grammar/intent route + the question-shape check land here.
+//
+// Two non-trivial design choices:
+//   1. *Server-side LRU*. The client also caches per-session. The
+//      server cache stands for cross-session repeat questions, so
+//      a popular "how do I know the chicken is done?" is shared
+//      across users for 30 minutes. Bounded so memory leaks are
+//      impossible.
+//   2. *Strict 25-word output budget* baked into the system prompt.
+//      TTS readout is the bottleneck — anything longer hurts
+//      comprehension. A validation failure falls back to a graceful
+//      canned message rather than 500-ing so the cook never hears
+//      silence on a parse hiccup.
+// =====================================================================
+
+const ASK_CHEF_SYSTEM_PROMPT = `You are a hands-free kitchen sous-chef speaking to a cook who is mid-recipe.
+The cook has just asked a question about the current step.
+
+Hard rules (never break):
+1. Keep the spoken answer <= 25 words. The cook is listening while their hands are wet; anything longer is not absorbed.
+2. State the practical action BEFORE the explanation.
+3. If the question is about safety (doneness, raw meat, allergens), always state the numeric safety threshold (e.g. 165F internal).
+4. Never invent ingredient amounts you don't have evidence for; if unsure, say "use a similar amount" rather than a precise number.
+5. Do not narrate the question back. Answer only.
+6. Use plain conversational English — no bullet lists, no markdown.
+7. Return ONLY the JSON object matching the schema. No commentary, no surrounding prose.`;
+
+// Mirrors the client's `normalizeQuestion` so a repeat question from
+// either side collapses to the same cache key regardless of who
+// computed it first.
+const ASK_CHEF_FILLER = new Set([
+  'a', 'an', 'the', 'i', 'me', 'my', 'for', 'to', 'of', 'is', 'are',
+  'do', 'does', 'can', 'could', 'should', 'would', 'will', 'you', 'know',
+]);
+const normalizeQuestionForCache = (raw: string): string =>
+  raw
+    .toLowerCase()
+    .replace(/[^a-z0-9\s?']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter((t) => t.length > 0 && !ASK_CHEF_FILLER.has(t))
+    .join(' ');
+
+const ASK_CHEF_CACHE_MAX = 50;
+const ASK_CHEF_CACHE_TTL_MS = 30 * 60 * 1000;
+type AskChefCachedValue = z.infer<typeof AskChefResponseSchema>;
+const askChefCache = new Map<string, { value: AskChefCachedValue; insertedAt: number }>();
+const readAskChefCache = (key: string): AskChefCachedValue | null => {
+  const entry = askChefCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.insertedAt > ASK_CHEF_CACHE_TTL_MS) {
+    askChefCache.delete(key);
+    return null;
+  }
+  return entry.value;
+};
+const writeAskChefCache = (key: string, value: AskChefCachedValue): void => {
+  if (askChefCache.size >= ASK_CHEF_CACHE_MAX) {
+    // Maps preserve insertion order; drop the oldest.
+    const oldest = askChefCache.keys().next().value;
+    if (oldest !== undefined) askChefCache.delete(oldest);
+  }
+  askChefCache.set(key, { value, insertedAt: Date.now() });
+};
+
+export const askChef = onCall(ALL_TOOL_GUARD, async (req) => {
+  const uid = requireUid(req);
+  const input = AskChefRequestSchema.parse(req.data);
+
+  // CookVoiceOverlay uses synthetic `cookmode:${planId}:${recipeId}`
+  // session ids that don't correspond to a real `cookingSessions/`
+  // doc. We accept the call instead of throwing — venting a 404 to
+  // the cook mid-recipe is the worst possible UX. The miss is
+  // logged so analytics can see when cook-with-me is used.
+  const session = await getSession(uid, input.sessionId);
+  if (!session) {
+    logEvent(input.sessionId, 'AGENT_TOOL_LOG', 'agent', {
+      tool: 'ask_chef',
+      source: 'overlay',
+      note: 'session-not-found',
+    });
+  }
+
+  // Cache key = `normalizeQuestion(q) + phase`. Deliberately DOES NOT
+  // include recipeName — "how do I know the chicken is done" has the
+  // same answer regardless of the recipe title, so joining recipeName
+  // just wastes slots and reduces cross-recipe hit rate.
+  const cacheKey =
+    (input.cacheKey ?? normalizeQuestionForCache(input.question)) +
+    '|' +
+    (input.currentStepPhase ?? 'any');
+
+  const cached = readAskChefCache(cacheKey);
+  if (cached) {
+    logEvent(input.sessionId, 'AGENT_TOOL_LOG', 'agent', {
+      tool: 'ask_chef',
+      source: 'cache',
+      cacheKey,
+    });
+    return { ...cached, source: 'cache' as const };
+  }
+
+  const prompt =
+    `${ASK_CHEF_SYSTEM_PROMPT}\n\n` +
+    (input.recipeName ? `RECIPE: ${input.recipeName}\n` : '') +
+    (input.currentStepNumber != null && input.currentStepText
+      ? `STEP ${input.currentStepNumber} (${input.currentStepPhase ?? 'cooking'}): ${input.currentStepText}\n`
+      : '') +
+    `COOK'S QUESTION: ${input.question}`;
+
+  const out = await ai.generate({
+    model: gemini20Flash,
+    prompt,
+    output: { schema: AskChefResponseSchema as unknown as z.ZodTypeAny },
+    config: { temperature: 0.4, maxOutputTokens: 128 },
+  });
+  const parsed = AskChefResponseSchema.safeParse(out.output);
+  if (!parsed.success) {
+    const fallback: AskChefCachedValue = {
+      answer:
+        'Sorry, I could not think of an answer just now. Try asking once more, slightly differently.',
+      followUp: null,
+    };
+    logEvent(input.sessionId, 'ERROR_OCCURRED', 'system', {
+      tool: 'ask_chef',
+      reason: 'parse_failed',
+    });
+    return { ...fallback, source: 'fresh' as const };
+  }
+  writeAskChefCache(cacheKey, parsed.data);
+  logEvent(input.sessionId, 'AGENT_TOOL_LOG', 'agent', {
+    tool: 'ask_chef',
+    source: 'fresh',
+    cacheKey,
+    questionLen: input.question.length,
+  });
+  return { ...parsed.data, source: 'fresh' as const };
 });
