@@ -101,16 +101,27 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
 Input.displayName = 'Input';
 
 export type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> &
-  Omit<ShellRenderProps, 'children'>;
+  Omit<ShellRenderProps, 'children'> & {
+    /**
+     * When set, the adjacent `<VoiceInputButton/>` appends each
+     * dictated utterance to the existing value with this separator
+     * instead of replacing. Used by prose fields (Notes / free-text
+     * comments) where successive transcripts are *additional
+     * paragraphs*, not full-field replacements. Mirrored onto the
+     * underlying textarea as `data-voice-separator`.
+     */
+    voiceAppendSeparator?: string;
+  };
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ label, hint, error, className = '', required, id, ...rest }, ref) => (
+  ({ label, hint, error, className = '', required, id, voiceAppendSeparator, ...rest }, ref) => (
     <Shell label={label} hint={hint} error={error} required={required}>
       <textarea
         id={id}
         ref={ref}
         rows={4}
         aria-invalid={Boolean(error)}
+        data-voice-separator={voiceAppendSeparator}
         className={`input-base resize-y ${className}`}
         {...rest}
       />

@@ -6,7 +6,8 @@ import { Sparkles } from 'lucide-react';
 
 import { SectionCard } from '@/components/common/Card';
 import { Button } from '@/components/common/Button';
-import { Input, Select, Textarea } from '@/components/common/Input';
+import { Input, Select } from '@/components/common/Input';
+import { FormInput, FormTextarea } from '@/components/common/FormInput';
 import { Chip } from '@/components/common/Chip';
 import { VoiceInputButton } from '@/components/common/VoiceInputButton';
 import { AllergenSchema, DietaryPatternSchema, type Allergen, type DietaryPattern } from '@/schemas/ingredient';
@@ -287,11 +288,11 @@ export const NewPlanPage = () => {
                 ))}
               </div>
             </fieldset>
-            <Input
+            <FormInput
+              field="excludedIngredients"
               label="Other ingredients to exclude (comma-separated)"
               placeholder="e.g. cilantro, anchovies"
               rightIcon={<VoiceInputButton />}
-              voiceAppendSeparator=", "
               {...register('excludedIngredients')}
             />
           </div>
@@ -356,11 +357,11 @@ export const NewPlanPage = () => {
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
-              <Input
+              <FormInput
+                field="pantryIngredients"
                 label="Pantry ingredients (auto-filled from voice pantry above)"
                 placeholder="chicken, garbanzo, garlic, ..."
                 rightIcon={<VoiceInputButton />}
-                voiceAppendSeparator=", "
                 {...register('pantryIngredients')}
               />
               <button
@@ -377,11 +378,11 @@ export const NewPlanPage = () => {
                 Use pantry ({pantryItems.length})
               </button>
             </div>
-            <Input
+            <FormInput
+              field="useSoonIngredients"
               label="Use soon (comma-separated)"
               placeholder="e.g. spinach, ripe tomatoes"
               rightIcon={<VoiceInputButton />}
-              voiceAppendSeparator=", "
               {...register('useSoonIngredients')}
             />
             <Select label="Skill level" {...register('skillLevel')}>
@@ -404,7 +405,8 @@ export const NewPlanPage = () => {
 
         <SectionCard title="Anything else?">
           <div data-voice-host className="relative">
-            <Textarea
+            <FormTextarea
+              field="notes"
               label="Free-text notes for the AI"
               placeholder={EXAMPLE_NOTE}
               {...register('notes')}
