@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Mic, MicOff } from 'lucide-react';
 
 import { useToast } from '@/components/common/Toast';
+import { joinVoiceDictation } from '@/lib/joinVoiceDictation';
 
 /**
  * Browser-native voice input for any adjacent <input> or <textarea>.
@@ -118,6 +119,13 @@ export const VoiceInputButton = ({
      * Excluded) where every voice input is *another* item rather
      * than a full replacement of the field.
      *
+     * Joining logic is delegated to `joinVoiceDictation` in
+     * `src/lib/joinVoiceDictation.ts` so the seven edge cases
+     * (empty prior, trailing comma, trailing whitespace, trailing
+     * sentence-period, mixed separators, multi-segment continuation,
+     * separator with whitespace) are independently tested rather
+     * than buried inside a DOM-bound callback.
+     *
      * Default behavior (no opt-in) is preserved: textareas append
      * with a single space (prose dictation); single-line inputs
      * replace entirely (contact details, names, etc.).
@@ -125,14 +133,7 @@ export const VoiceInputButton = ({
     const sep = host.dataset.voiceSeparator;
     let newValue: string;
     if (sep !== undefined) {
-      // Trim trailing whitespace/punctuation from the prior value
-      // and the dictated value so the separator doesn't accumulate
-      // double-space or stray commas on rapid second taps. Includes
-      // handling for empty initial value: first dictation writes
-      // cleanly with no leading separator.
-      const prior = host.value ? host.value.replace(/[\s,;]+$/, '') : '';
-      const incoming = value.replace(/^[\s,;]+/, '');
-      newValue = prior ? `${prior}${sep}${incoming}` : incoming;
+      newValue = joinVoiceDictation(host.value, value, sep);
     } else if (isTextarea) {
       newValue = host.value ? `${host.value} ${value}` : value.trim();
     } else {
