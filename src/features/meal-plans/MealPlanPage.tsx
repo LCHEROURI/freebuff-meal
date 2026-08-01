@@ -121,7 +121,7 @@ export const MealPlanPage = () => {
         excludedIngredients: profile.excludedIngredients,
         preferredCuisines: profile.favoriteCuisines,
         preferredProteins: profile.preferredProteins,
-        pantryIngredients: [],
+        pantryIngredients: '',
         availableEquipment: profile.availableEquipment,
         skillLevel: profile.skillLevel,
         budgetPreference: profile.budgetPreference,

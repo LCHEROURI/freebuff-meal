@@ -110,9 +110,34 @@ export const VoiceInputButton = ({
     const host = findHost();
     if (!host) return;
     const isTextarea = host.tagName.toLowerCase() === 'textarea';
-    const newValue = isTextarea
-      ? (host.value ? `${host.value} ${value}` : value).trim()
-      : value;
+    /**
+     * Field opted in to additive voice input via `data-voice-separator`
+     * — append the dictated value with the configured separator so
+     * successive utterances don't replace prior content. Used by
+     * comma-separated list fields (Pantry ingredients, Use-soon,
+     * Excluded) where every voice input is *another* item rather
+     * than a full replacement of the field.
+     *
+     * Default behavior (no opt-in) is preserved: textareas append
+     * with a single space (prose dictation); single-line inputs
+     * replace entirely (contact details, names, etc.).
+     */
+    const sep = host.dataset.voiceSeparator;
+    let newValue: string;
+    if (sep !== undefined) {
+      // Trim trailing whitespace/punctuation from the prior value
+      // and the dictated value so the separator doesn't accumulate
+      // double-space or stray commas on rapid second taps. Includes
+      // handling for empty initial value: first dictation writes
+      // cleanly with no leading separator.
+      const prior = host.value ? host.value.replace(/[\s,;]+$/, '') : '';
+      const incoming = value.replace(/^[\s,;]+/, '');
+      newValue = prior ? `${prior}${sep}${incoming}` : incoming;
+    } else if (isTextarea) {
+      newValue = host.value ? `${host.value} ${value}` : value.trim();
+    } else {
+      newValue = value;
+    }
     const proto = isTextarea ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
     setter?.call(host, newValue);

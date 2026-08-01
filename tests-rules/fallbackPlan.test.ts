@@ -12,7 +12,7 @@ const baseInput: MealPlanGenerationInput = {
   excludedIngredients: [],
   preferredCuisines: [],
   preferredProteins: [],
-  pantryIngredients: [],
+  pantryIngredients: '',
   useSoonIngredients: [],
   availableEquipment: [],
   skillLevel: 'intermediate',

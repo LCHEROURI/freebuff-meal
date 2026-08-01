@@ -43,18 +43,27 @@ export const NewPlanPage = () => {
   const onUsePantryFromStrip = () => {
     if (pantryItems.length === 0) return;
     const names = pantryItems.map((p) => p.name);
-    // The form's `pantryIngredients` is `string[]` per the schema; the
-    // comma-joined display is rendered by the Input component. We
-    // dedupe against whatever the user has typed so a fresh "Use
-    // pantry (5)" tap doesn't double-count items already typed in.
-    const current = Array.isArray(values.pantryIngredients)
-      ? (values.pantryIngredients as string[])
-      : ((values.pantryIngredients ?? '') as string)
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean);
-    const merged = Array.from(new Set([...current, ...names]));
-    setValue('pantryIngredients', merged, { shouldDirty: true });
+    /**
+     * `pantryIngredients` is a free-text string (relaxed schema — PR
+     * #44). We split on commas, fold in the pantry-strip names,
+     * dedupe case-insensitively, then re-join with a comma so the
+     * resulting value remains a sensible text-field value the
+     * user can keep typing into.
+     */
+    const currentText = (values.pantryIngredients ?? '') as string;
+    const current = currentText
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const seen = new Set<string>();
+    const merged: string[] = [];
+    for (const token of [...current, ...names]) {
+      const key = token.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(token);
+    }
+    setValue('pantryIngredients', merged.join(', '), { shouldDirty: true });
     toast.push({
       kind: 'success',
       title: `Using ${names.length} pantry item${names.length === 1 ? '' : 's'}`,
@@ -166,7 +175,9 @@ export const NewPlanPage = () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         summary: `${input.planLength} realistic dinners using ${
-          (input.pantryIngredients ?? []).length > 0 ? 'your pantry ingredients' : 'common staples'
+          (input.pantryIngredients ?? '').trim().length > 0
+            ? 'your pantry ingredients'
+            : 'common staples'
         }.`,
       };
       if (user) {
@@ -338,6 +349,7 @@ export const NewPlanPage = () => {
                 label="Pantry ingredients (auto-filled from voice pantry above)"
                 placeholder="chicken, garbanzo, garlic, ..."
                 rightIcon={<VoiceInputButton />}
+                voiceAppendSeparator=", "
                 {...register('pantryIngredients')}
               />
               <button

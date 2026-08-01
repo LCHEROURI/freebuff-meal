@@ -117,7 +117,7 @@ export const regenerateRecipe = async (
       excludedIngredients: profile.excludedIngredients,
       preferredCuisines: profile.preferredCuisines,
       preferredProteins: profile.preferredProteins,
-      pantryIngredients: [],
+      pantryIngredients: '',
       useSoonIngredients: [],
       availableEquipment: ['Stovetop', 'Oven'],
       skillLevel: 'intermediate',

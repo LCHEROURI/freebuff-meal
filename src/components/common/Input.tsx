@@ -39,14 +39,40 @@ const Shell = ({ label, hint, error, children, required }: ShellRenderProps) => 
   </label>
 );
 
-type Adornments = { leftIcon?: ReactNode; rightIcon?: ReactNode };
+type Adornments = {
+  leftIcon?: ReactNode;
+  rightIcon?: ReactNode;
+  /**
+   * When set, the rightIcon `<VoiceInputButton/>` appends each
+   * dictated utterance to the existing value with this separator
+   * instead of replacing. Used by comma-separated list fields
+   * (Pantry ingredients, Use-soon, Excluded) where successive voice
+   * inputs are *additional* items, not full-field replacements.
+   * Mirrored onto the underlying input as `data-voice-separator`.
+   */
+  voiceAppendSeparator?: string;
+};
 
 export type InputProps = InputHTMLAttributes<HTMLInputElement> &
   Omit<ShellRenderProps, 'children'> &
   Adornments;
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, hint, error, leftIcon, rightIcon, className = '', required, id, ...rest }, ref) => (
+  (
+    {
+      label,
+      hint,
+      error,
+      leftIcon,
+      rightIcon,
+      voiceAppendSeparator,
+      className = '',
+      required,
+      id,
+      ...rest
+    },
+    ref,
+  ) => (
     <Shell label={label} hint={hint} error={error} required={required}>
       <div className="relative">
         {leftIcon && (
@@ -59,6 +85,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           aria-invalid={Boolean(error)}
           aria-required={required}
+          data-voice-separator={voiceAppendSeparator}
           className={`input-base ${leftIcon ? 'pl-9' : ''} ${rightIcon ? 'pr-9' : ''} ${className}`}
           {...rest}
         />

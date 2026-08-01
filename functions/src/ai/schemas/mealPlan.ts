@@ -28,7 +28,15 @@ export const MealPlanGenerationInputSchema = z.object({
   excludedIngredients: z.array(z.string().max(60)).max(40).optional().default([]),
   preferredCuisines: z.array(z.string().max(40)).max(10).optional().default([]),
   preferredProteins: z.array(z.string().max(40)).max(10).optional().default([]),
-  pantryIngredients: z.array(z.string().max(60)).max(40).optional().default([]),
+  /**
+   * Free-text comma-separated string. No length or pattern constraint:
+   * the cook's pantry field accepts any standard text input — a single
+   * ingredient ("chicken"), a comma-separated list ("chicken,
+   * tomatoes, garlic"), or free-form natural language ("whatever is
+   * in the back of the fridge"). The backend splits as needed at the
+   * LLM prompt stage.
+   */
+  pantryIngredients: z.string().optional().default(''),
   useSoonIngredients: z.array(z.string().max(60)).max(10).optional().default([]),
   availableEquipment: z.array(z.string().max(40)).max(20).optional().default([]),
   skillLevel: z.enum(['beginner', 'intermediate', 'advanced']),
