@@ -114,11 +114,17 @@ export const regenerateRecipe = async (
       maxTotalTimeMinutes: profile.maxTotalTimeMinutes,
       dietaryPattern: 'none',
       allergens: profile.allergens as never,
-      excludedIngredients: profile.excludedIngredients,
+      // `excludedIngredients` is now a free-text string (PR #47). The
+      // profile keeps its own `string[]` shape; we translate at the
+      // call boundary so the demo-mode fallbackPlan input matches the
+      // new schema. The fallbackPlan helper itself comma-splits the
+      // string back into a list internally so the deterministic filter
+      // (`excludedDish`) keeps matching individual exclusions.
+      excludedIngredients: (profile.excludedIngredients ?? []).join(', '),
       preferredCuisines: profile.preferredCuisines,
       preferredProteins: profile.preferredProteins,
       pantryIngredients: '',
-      useSoonIngredients: [],
+      useSoonIngredients: '',
       availableEquipment: ['Stovetop', 'Oven'],
       skillLevel: 'intermediate',
       budgetPreference: 'everyday',

@@ -77,6 +77,16 @@ export const NewPlanPage = () => {
   // the form-boundary so the resolver's literal-union check stays green; if
   // the user's setting isn't a valid literal, zod will surface a validation
   // error on submit rather than silently coercing it.
+  //
+  // `pantryIngredients` / `excludedIngredients` / `useSoonIngredients`
+  // are now free-text strings (PR #44 + PR #47). The profile keeps its
+  // own `string[]` shape so Settings, the pantry strip, and the exported
+  // share snapshot stay list-shaped; we translate at the form-boundary
+  // here so the wizard's RHF `defaultValues` match the schema. This
+  // declaration MUST land before `defaults` below — TDZ on
+  // `const` makes the inner reference use-before-declare.
+  const profileExcludedString =
+    profile?.excludedIngredients?.join(', ') ?? '';
   const defaults = profile
     ? {
         planLength: profile.defaultPlanLength as 3 | 5 | 7,
@@ -87,7 +97,7 @@ export const NewPlanPage = () => {
         preferredCuisines: profile.favoriteCuisines,
         preferredProteins: profile.preferredProteins,
         availableEquipment: profile.availableEquipment,
-        excludedIngredients: profile.excludedIngredients,
+        excludedIngredients: profileExcludedString,
         skillLevel: profile.skillLevel,
         budgetPreference: profile.budgetPreference,
         leftoverPreference: profile.leftoverPreference,
@@ -102,7 +112,7 @@ export const NewPlanPage = () => {
         preferredCuisines: [] as string[],
         preferredProteins: [] as string[],
         availableEquipment: [] as string[],
-        excludedIngredients: [] as string[],
+        excludedIngredients: '',
         skillLevel: 'intermediate' as const,
         budgetPreference: 'everyday' as const,
         leftoverPreference: 'some' as const,
@@ -281,6 +291,7 @@ export const NewPlanPage = () => {
               label="Other ingredients to exclude (comma-separated)"
               placeholder="e.g. cilantro, anchovies"
               rightIcon={<VoiceInputButton />}
+              voiceAppendSeparator=", "
               {...register('excludedIngredients')}
             />
           </div>
@@ -370,6 +381,7 @@ export const NewPlanPage = () => {
               label="Use soon (comma-separated)"
               placeholder="e.g. spinach, ripe tomatoes"
               rightIcon={<VoiceInputButton />}
+              voiceAppendSeparator=", "
               {...register('useSoonIngredients')}
             />
             <Select label="Skill level" {...register('skillLevel')}>

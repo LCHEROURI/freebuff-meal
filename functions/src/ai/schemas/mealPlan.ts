@@ -25,7 +25,16 @@ export const MealPlanGenerationInputSchema = z.object({
   maxActivePrepMinutes: z.number().int().min(5).max(90).optional(),
   dietaryPattern: DietaryPatternSchema,
   allergens: z.array(AllergenSchema).max(40).optional().default([]),
-  excludedIngredients: z.array(z.string().max(60)).max(40).optional().default([]),
+  /**
+   * Free-text comma-separated string. No length or pattern constraint:
+   * the cook's exclude field accepts any standard text input — a
+   * single ingredient ("cilantro"), a comma-separated list ("cilantro,
+   * anchovies, scallops"), or free-form natural language ("anything
+   * with mushrooms"). The backend splits as needed at the LLM prompt
+   * stage. Demo-mode library splits on commas internally so the
+   * deterministic filter continues to apply individual exclusions.
+   */
+  excludedIngredients: z.string().optional().default(''),
   preferredCuisines: z.array(z.string().max(40)).max(10).optional().default([]),
   preferredProteins: z.array(z.string().max(40)).max(10).optional().default([]),
   /**
@@ -37,7 +46,13 @@ export const MealPlanGenerationInputSchema = z.object({
    * LLM prompt stage.
    */
   pantryIngredients: z.string().optional().default(''),
-  useSoonIngredients: z.array(z.string().max(60)).max(10).optional().default([]),
+  /**
+   * Free-text comma-separated string. No length or pattern constraint:
+   * the cook's use-soon field accepts any standard text input — items
+   * that are about to go off and should be incorporated into recipes.
+   * Single ingredient, list, or free-form prose is all fair.
+   */
+  useSoonIngredients: z.string().optional().default(''),
   availableEquipment: z.array(z.string().max(40)).max(20).optional().default([]),
   skillLevel: z.enum(['beginner', 'intermediate', 'advanced']),
   budgetPreference: z.enum(['everyday', 'moderate', 'splurge']),
