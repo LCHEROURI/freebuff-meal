@@ -40,6 +40,9 @@ const PlansListPage = lazy(() =>
 const RecipeDetailPage = lazy(() =>
   import('@/features/recipes/RecipeDetailPage').then((m) => ({ default: m.RecipeDetailPage })),
 );
+const RecipeEditPage = lazy(() =>
+  import('@/features/recipes/RecipeEditPage').then((m) => ({ default: m.RecipeEditPage })),
+);
 const CookModePage = lazy(() =>
   import('@/features/recipes/CookModePage').then((m) => ({ default: m.CookModePage })),
 );
@@ -112,6 +115,10 @@ export const App = () => (
               <Route
                 path="plans/:planId/recipes/:recipeId/cook"
                 element={<Lazy><CookModePage /></Lazy>}
+              />
+              <Route
+                path="plans/:planId/recipes/:recipeId/edit"
+                element={<Lazy><RecipeEditPage /></Lazy>}
               />
               <Route path="agent" element={<Lazy><CookingAgentPage /></Lazy>} />
               <Route

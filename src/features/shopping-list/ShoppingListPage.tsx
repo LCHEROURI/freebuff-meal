@@ -6,10 +6,13 @@ import { Card } from '@/components/common/Card';
 import { Button } from '@/components/common/Button';
 import { Input, Select } from '@/components/common/Input';
 import { Dialog } from '@/components/common/Dialog';
+import { FormTextarea } from '@/components/common/FormInput';
+import { VoiceInputButton } from '@/components/common/VoiceInputButton';
 import { useToast } from '@/components/common/Toast';
 import { ensureProfile, pantryStore, plansStore, shoppingStore, type DemoMealPlan } from '@/utils/demoAdapter';
 import { useAuth } from '@/features/auth/authContext';
 import { consolidate, itemIdentity } from './consolidate';
+import { shoppingListFieldUI } from '@/lib/fieldUI';
 import type { ShoppingListItem } from '@/schemas/ingredient';
 
 const CATEGORIES: Array<ShoppingListItem['category']> = [
@@ -107,14 +110,50 @@ export const ShoppingListPage = () => {
     );
   };
 
-  const updateQuantity = (id: string, qty: number) => {
-    persist(items.map((i) => {
+  const updateQuantity = (id: string, qty: number, prepNote: string) => {
+    const trimmedPrep = prepNote.trim();
+    const prepPart = trimmedPrep ? `, ${trimmedPrep}` : '';
+
+    const updated = items.map((i) => {
       if (computeId(i) !== id) return i;
       const displayText = qty === 0
         ? i.displayText
-        : `${qty} ${i.unit} ${i.name}${i.preparationNote ? `, ${i.preparationNote}` : ''}`;
-      return { ...i, quantity: qty, displayText };
-    }));
+        : `${qty} ${i.unit} ${i.name}${prepPart}`;
+      return {
+        ...i,
+        quantity: qty,
+        preparationNote: trimmedPrep || undefined,
+        displayText,
+      };
+    });
+
+    // Identity collision guard: if the edited item's new preparation-note
+    // makes its computeId match another row's, merge quantities and drop
+    // the duplicate so React keys stay unique.
+    const editedIdx = items.findIndex((i) => computeId(i) === id);
+    if (editedIdx === -1) { persist(updated); return; }
+    const edited = updated[editedIdx];
+    const newId = computeId(edited);
+    const collidedIdx = updated.findIndex(
+      (i, idx) => idx !== editedIdx && computeId(i) === newId,
+    );
+    if (collidedIdx === -1) { persist(updated); return; }
+
+    const merged = updated.filter((_, idx) => idx !== collidedIdx);
+    const collided = updated[collidedIdx];
+    // Preserve any recipe-provenance suffix baked into the collided
+    // item's displayText by the consolidation step (e.g. "(used in
+    // 3 recipes)"). The collided item carries it; the edited item
+    // may not if it was a custom add.
+    const recipesSuffix =
+      collided.displayText.match(/\(used in \d+ recipes?\)/)?.[0] ?? '';
+    const mergedQty = edited.quantity + collided.quantity;
+    merged[editedIdx > collidedIdx ? editedIdx - 1 : editedIdx] = {
+      ...edited,
+      quantity: mergedQty,
+      displayText: `${mergedQty} ${edited.unit} ${edited.name}${prepPart}${recipesSuffix ? ` ${recipesSuffix}` : ''}`,
+    };
+    persist(merged);
   };
 
   const clearChecked = () => {
@@ -217,8 +256,8 @@ export const ShoppingListPage = () => {
         open={editing !== null}
         onClose={() => setEditing(null)}
         item={editing ? items.find((i) => computeId(i) === editing) ?? null : null}
-        onSave={(qty) => {
-          if (editing) updateQuantity(editing, qty);
+        onSave={(qty, prepNote) => {
+          if (editing) updateQuantity(editing, qty, prepNote);
           setEditing(null);
         }}
       />
@@ -318,11 +357,15 @@ const EditItemDialog = ({
   open: boolean;
   onClose: () => void;
   item: ShoppingListItem | null;
-  onSave: (qty: number) => void;
+  onSave: (qty: number, preparationNote: string) => void;
 }) => {
   const [qty, setQty] = useState<number>(item?.quantity ?? 1);
+  const [prepNote, setPrepNote] = useState<string>(
+    item?.preparationNote ?? '',
+  );
   useEffect(() => {
     setQty(item?.quantity ?? 1);
+    setPrepNote(item?.preparationNote ?? '');
   }, [item]);
 
   return (
@@ -335,14 +378,14 @@ const EditItemDialog = ({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={() => onSave(qty)}>
+          <Button onClick={() => onSave(qty, prepNote)}>
             Save
           </Button>
         </>
       }
     >
       {item && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           <Input
             label="Quantity"
             type="number"
@@ -350,8 +393,23 @@ const EditItemDialog = ({
             value={qty}
             onChange={(e) => setQty(Number(e.target.value))}
           />
+          <div data-voice-host>
+            <FormTextarea
+              fieldUI={shoppingListFieldUI}
+              field="preparationNote"
+              label="Preparation note"
+              placeholder="e.g. diced, julienned, room temperature"
+              rows={2}
+              value={prepNote}
+              onChange={(e) => setPrepNote(e.target.value)}
+            />
+            <div className="mt-1 flex justify-end">
+              <VoiceInputButton />
+            </div>
+          </div>
           <p className="text-xs text-ink-500">
-            Pressing save updates the persisted shopping list. Remove drops the item entirely.
+            Pressing save updates the persisted shopping list. Remove drops
+            the item entirely.
           </p>
         </div>
       )}

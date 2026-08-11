@@ -8,6 +8,7 @@ import { SectionCard } from '@/components/common/Card';
 import { Button } from '@/components/common/Button';
 import { Input, Select } from '@/components/common/Input';
 import { FormInput, FormTextarea } from '@/components/common/FormInput';
+import { mealPlanFieldUI } from '@/lib/fieldUI';
 import { Chip } from '@/components/common/Chip';
 import { VoiceInputButton } from '@/components/common/VoiceInputButton';
 import { AllergenSchema, DietaryPatternSchema, type Allergen, type DietaryPattern } from '@/schemas/ingredient';
@@ -90,7 +91,7 @@ export const NewPlanPage = () => {
     profile?.excludedIngredients?.join(', ') ?? '';
   const defaults = profile
     ? {
-        planLength: profile.defaultPlanLength as 3 | 5 | 7,
+        planLength: profile.defaultPlanLength ?? 5,
         servings: profile.defaultServings,
         maxTotalTimeMinutes: profile.maxTotalTimeMinutes,
         dietaryPattern: profile.dietaryPattern,
@@ -105,7 +106,7 @@ export const NewPlanPage = () => {
         notes: '',
       }
     : {
-        planLength: 5 as 3 | 5 | 7,
+        planLength: 5,
         servings: 2,
         maxTotalTimeMinutes: 45,
         dietaryPattern: 'none' as DietaryPattern,
@@ -233,8 +234,12 @@ export const NewPlanPage = () => {
         <SectionCard title="Plan shape">
           <div className="grid gap-4 sm:grid-cols-3">
             <Select label="Number of dinners" {...register('planLength', { valueAsNumber: true })}>
+              <option value={1}>1 dinner</option>
+              <option value={2}>2 dinners</option>
               <option value={3}>3 dinners</option>
+              <option value={4}>4 dinners</option>
               <option value={5}>5 dinners</option>
+              <option value={6}>6 dinners</option>
               <option value={7}>7 dinners</option>
             </Select>
             <Input
@@ -289,6 +294,7 @@ export const NewPlanPage = () => {
               </div>
             </fieldset>
             <FormInput
+              fieldUI={mealPlanFieldUI}
               field="excludedIngredients"
               label="Other ingredients to exclude (comma-separated)"
               placeholder="e.g. cilantro, anchovies"
@@ -358,6 +364,7 @@ export const NewPlanPage = () => {
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
               <FormInput
+                fieldUI={mealPlanFieldUI}
                 field="pantryIngredients"
                 label="Pantry ingredients (auto-filled from voice pantry above)"
                 placeholder="chicken, garbanzo, garlic, ..."
@@ -379,6 +386,7 @@ export const NewPlanPage = () => {
               </button>
             </div>
             <FormInput
+              fieldUI={mealPlanFieldUI}
               field="useSoonIngredients"
               label="Use soon (comma-separated)"
               placeholder="e.g. spinach, ripe tomatoes"
@@ -406,6 +414,7 @@ export const NewPlanPage = () => {
         <SectionCard title="Anything else?">
           <div data-voice-host className="relative">
             <FormTextarea
+              fieldUI={mealPlanFieldUI}
               field="notes"
               label="Free-text notes for the AI"
               placeholder={EXAMPLE_NOTE}

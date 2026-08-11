@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
-import { ChefHat, Printer, Replace, Share2 } from 'lucide-react';
+import { ChefHat, Printer, Replace, Share2, Pencil } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { plansStore, type DemoMealPlan } from '@/utils/demoAdapter';
@@ -143,6 +143,15 @@ export const RecipeDetailPage = () => {
           leftIcon={<Share2 size={14} aria-hidden="true" />}
         >
           Copy link
+        </Button>
+        <Button
+          asChildLink
+          to={`/app/plans/${plan.id}/recipes/${recipe.id}/edit`}
+          variant="secondary"
+          size="sm"
+          leftIcon={<Pencil size={14} aria-hidden="true" />}
+        >
+          Edit
         </Button>
         <Link
           to={`/app/plans/${plan.id}/recipes/${recipe.id}/cook`}

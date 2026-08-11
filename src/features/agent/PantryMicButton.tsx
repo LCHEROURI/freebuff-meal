@@ -23,11 +23,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Mic, MicOff, Save, X } from 'lucide-react';
+import { Mic, MicOff, Save, X, Pencil } from 'lucide-react';
 
 import { Button } from '@/components/common/Button';
 import { useToast } from '@/components/common/Toast';
 import { useSpeechDictation } from '@/lib/useSpeech';
+import { FormTextarea } from '@/components/common/FormInput';
+import { VoiceInputButton } from '@/components/common/VoiceInputButton';
+import { pantryFieldUI } from '@/lib/fieldUI';
 
 import { agentClient } from './agentClient';
 import type { PantryItem } from './agentTypes';
@@ -41,6 +44,7 @@ type PreviewRow = {
   unit: string | null;
   condition: PantryItem['condition'];
   confidence: number;
+  note: string;
 };
 
 export type PantryMicButtonProps = {
@@ -74,6 +78,7 @@ export const PantryMicButton = ({
 
   const [status, setStatus] = useState<CaptureStatus>('idle');
   const [preview, setPreview] = useState<PreviewRow[]>([]);
+  const [editingNoteKey, setEditingNoteKey] = useState<string | null>(null);
 
   // Whenever the cook commits a final utterance chunk, pipe it
   // through the existing extractor. We accumulate results into the
@@ -93,6 +98,7 @@ export const PantryMicButton = ({
           unit: i.unit,
           condition: i.condition,
           confidence: i.confidence,
+          note: '',
         }));
         if (rows.length === 0) return;
         setPreview((prev) => dedupePreview([...prev, ...rows]));
@@ -129,6 +135,7 @@ export const PantryMicButton = ({
     }
     resetSpeech();
     setPreview([]);
+    setEditingNoteKey(null);
     setStatus('listening');
     startSpeech();
   }, [supported, uid, resetSpeech, startSpeech, toast]);
@@ -165,6 +172,7 @@ export const PantryMicButton = ({
             unit: p.unit,
             condition: p.condition,
             confidence: p.confidence,
+            note: p.note.trim() || undefined,
           })),
           source: 'voice',
         });
@@ -177,6 +185,7 @@ export const PantryMicButton = ({
       setPreview([]);
       resetSpeech();
       setStatus('idle');
+      setEditingNoteKey(null);
     } catch (err) {
       setStatus('preview');
       toast.push({
@@ -191,10 +200,18 @@ export const PantryMicButton = ({
     setPreview([]);
     resetSpeech();
     setStatus('idle');
+    setEditingNoteKey(null);
   }, [resetSpeech]);
 
   const onRemoveRow = useCallback((key: string) => {
     setPreview((prev) => prev.filter((p) => p.key !== key));
+    if (editingNoteKey === key) setEditingNoteKey(null);
+  }, [editingNoteKey]);
+
+  const onNoteChange = useCallback((key: string, note: string) => {
+    setPreview((prev) =>
+      prev.map((p) => (p.key === key ? { ...p, note } : p)),
+    );
   }, []);
 
   // Surface SR-friendly status changes.
@@ -272,20 +289,56 @@ export const PantryMicButton = ({
             {preview.map((p) => (
               <li
                 key={p.key}
-                className="inline-flex items-center gap-1 rounded-full bg-flour-100 px-2.5 py-1 text-xs"
+                className="rounded-lg bg-flour-100 px-3 py-2 text-xs"
               >
-                <span className="font-medium">{p.name}</span>
-                {p.condition && (
-                  <span className="text-ink-500">({p.condition})</span>
+                <div className="flex items-center gap-1">
+                  <span className="font-medium">{p.name}</span>
+                  {p.condition && (
+                    <span className="text-ink-500">({p.condition})</span>
+                  )}
+                  <button
+                    type="button"
+                    aria-label={`Edit note for ${p.name}`}
+                    title="Add a note"
+                    className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-ink-400 hover:text-ink-700"
+                    onClick={() =>
+                      setEditingNoteKey(
+                        editingNoteKey === p.key ? null : p.key,
+                      )
+                    }
+                  >
+                    <Pencil size={10} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${p.name}`}
+                    className="ml-auto inline-flex h-4 w-4 items-center justify-center rounded-full text-ink-500 hover:bg-tomato-100 hover:text-tomato-700"
+                    onClick={() => onRemoveRow(p.key)}
+                  >
+                    <X size={10} aria-hidden="true" />
+                  </button>
+                </div>
+                {p.note && editingNoteKey !== p.key && (
+                  <p className="mt-1 text-ink-500 italic">“{p.note}”</p>
                 )}
-                <button
-                  type="button"
-                  aria-label={`Remove ${p.name}`}
-                  className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-ink-500 hover:bg-tomato-100 hover:text-tomato-700"
-                  onClick={() => onRemoveRow(p.key)}
-                >
-                  <X size={10} aria-hidden="true" />
-                </button>
+                {editingNoteKey === p.key && (
+                  <div data-voice-host className="mt-2">
+                    <FormTextarea
+                      fieldUI={pantryFieldUI}
+                      field="note"
+                      aria-label={`Note for ${p.name}`}
+                      rows={2}
+                      value={p.note}
+                      onChange={(e) =>
+                        onNoteChange(p.key, e.target.value)
+                      }
+                      className="text-xs"
+                    />
+                    <div className="mt-1 flex justify-end">
+                      <VoiceInputButton />
+                    </div>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
