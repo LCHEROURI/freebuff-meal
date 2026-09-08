@@ -1,6 +1,6 @@
 import {
   collection, doc, getDoc, getDocs, setDoc, deleteDoc, query, where,
-  serverTimestamp, type Firestore, type DocumentData,
+  limit, orderBy, serverTimestamp, type Firestore, type DocumentData,
 } from 'firebase/firestore';
 
 import { getFirestoreDb, isFirebaseConfigured, getUserId } from '@/lib/firebase';
@@ -66,6 +66,51 @@ const getById = async <T extends DocShape>(db: Firestore, name: CollectionName, 
   return snap.exists() ? deserialize<T>(snap.id, snap.data()) : null;
 };
 
+// ─── Bounded feed reads (read-budget guard) ─────────────────────────────────
+// Firestore bills per document READ, and the store/UI never keep more than
+// their in-memory caps: logActivity keeps activity at 200 entries (the
+// Activity page renders 100) and saveReport keeps reports at 60. Reading the
+// full collections was unbounded — the owner's activity collection alone held
+// ~1.1k docs, so every page load charged ~5x the rows the UI can ever show,
+// and the verify suite's owner-session page loads multiplied that across
+// gates. These two bounded reads cap the billed reads at exactly the limits
+// the in-memory store already enforces (no display regression possible).
+//
+// Activity is ordered by document id DESC: ids are `a-<base36-ms><rand>`
+// (timestamp-prefixed, see uid() in lib/store.tsx), so descending id order
+// returns newest-first — and an equality filter + document-id ordering is
+// served by the DEFAULT index, so NO composite index is needed (createdAt
+// would need one, and these docs store it as a string, not a Timestamp).
+// The SDK maps the '__name__' field string to the document id (the static
+// FieldPath.documentId() helper is absent from this SDK's types). This also
+// fixes a latent quirk: the old unbounded natural order returned the OLDEST
+// entries first.
+//
+// Reports keep NO orderBy: ids mix `r-<ts>` (in-app) and `r-seed-<kind>-<date>`
+// (seeder), so document-id order is not reliably newest-first; a plain limit
+// preserves today's exact display order while capping the read cost.
+const ACTIVITY_READ_LIMIT = 200;
+const REPORTS_READ_LIMIT = 60;
+
+const listActivity = async (db: Firestore, userId: string): Promise<ActivityEntry[]> => {
+  const snap = await getDocs(query(
+    col(db, 'activity'),
+    where('userId', '==', userId),
+    orderBy('__name__', 'desc'),
+    limit(ACTIVITY_READ_LIMIT),
+  ));
+  return snap.docs.map((d) => deserialize<ActivityEntry>(d.id, d.data()));
+};
+
+const listReports = async (db: Firestore, userId: string): Promise<Report[]> => {
+  const snap = await getDocs(query(
+    col(db, 'reports'),
+    where('userId', '==', userId),
+    limit(REPORTS_READ_LIMIT),
+  ));
+  return snap.docs.map((d) => deserialize<Report>(d.id, d.data()));
+};
+
 const upsert = async <T extends DocShape>(db: Firestore, name: CollectionName, data: T): Promise<T> => {
   const ref = doc(db, COLLECTIONS[name], data.id);
   await setDoc(ref, { ...serialize(data), updatedAt: serverTimestamp() }, { merge: true });
@@ -120,8 +165,8 @@ class FirestoreService implements DataService {
         listAll<Deployment>(db, 'deployments', userId),
         listAll<Task>(db, 'tasks', userId),
         listAll<ModelEvaluation>(db, 'evaluations', userId),
-        listAll<ActivityEntry>(db, 'activity', userId),
-        listAll<Report>(db, 'reports', userId),
+        listActivity(db, userId),
+        listReports(db, userId),
       ]);
     return {
       profile: profile ?? this.defaultProfile(userId),
@@ -136,7 +181,7 @@ class FirestoreService implements DataService {
   private defaultProfile(userId: string): UserProfile {
     const now = new Date().toISOString();
     return {
-      id: userId, name: 'Command Center User', email: '', timezone: 'America/Los_Angeles',
+      id: userId, name: 'Command Center User', timezone: 'America/Los_Angeles',
       dailyReportEnabled: true, dailyReportTime: '08:00',
       weeklyReportEnabled: true, weeklyReportDay: 1, weeklyReportTime: '09:00',
       defaultStaleDays: 7, createdAt: now, updatedAt: now,
@@ -160,7 +205,125 @@ class FirestoreService implements DataService {
 
 // ── Demo (localStorage) implementation ───────────────────────────────────────
 
-const STORAGE_KEY = 'apcc-demo-store-v1';
+export const DEMO_STORAGE_KEY = 'apcc-demo-store-v1';
+
+/**
+ * Read the demo (localStorage) store directly. Used by the Phase 3 migration
+ * path to import existing local data into a real Firestore account.
+ */
+export const readLocalDemoData = (): (SeedBundle & { reports: Report[] }) | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(DEMO_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SeedBundle & { reports?: Report[] };
+    return { ...parsed, reports: parsed.reports ?? [] };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Migration path (Phase 3): copy the current localStorage demo data into a
+ * real Firestore account, re-keyed to the signed-in user. Returns the number
+ * of documents written, or 0 when there is no local data to migrate.
+ */
+export const migrateLocalDemoToFirestore = async (userId: string): Promise<number> => {
+  const local = readLocalDemoData();
+  if (!local) return 0;
+  const db = getFirestoreDb();
+  if (!db) throw new Error('Firestore is not configured.');
+  const service = new FirestoreService();
+
+  const now = new Date().toISOString();
+  // Namespace every migrated document id with a short uid so the same browser's
+  // demo data can be imported into multiple accounts without colliding, and so
+  // Firestore rules (userId == auth.uid) can never block a second import.
+  const shortUid = userId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'u';
+  const idMap = new Map<string, string>();
+  const register = (prefix: string, oldId?: string) => {
+    if (!oldId || idMap.has(oldId)) return;
+    idMap.set(oldId, `${prefix}-${shortUid}-${oldId}`);
+  };
+  for (const p of local.projects) register('p', p.id);
+  for (const v of local.versions) register('v', v.id);
+  for (const r of local.repositories) register('r', r.id);
+  for (const d of local.deployments) register('d', d.id);
+  for (const t of local.tasks) register('t', t.id);
+  for (const e of local.evaluations) register('e', e.id);
+  for (const a of local.activity) register('a', a.id);
+  for (const r of local.reports) register('rp', r.id);
+  // Resolve a foreign key to its namespaced id (falls back to the original).
+  const ref = (oldId?: string): string | undefined => (oldId && idMap.get(oldId)) || oldId;
+  const refReq = (oldId: string): string => ref(oldId) ?? oldId;
+
+  let count = 0;
+  const profile = { ...local.profile, id: userId, userId, updatedAt: now };
+  await service.saveProfile(profile);
+  count += 1;
+
+  for (const p of local.projects) {
+    await service.saveProject({
+      ...p, id: idMap.get(p.id)!, userId,
+      currentVersionId: ref(p.currentVersionId),
+      winningVersionId: ref(p.winningVersionId),
+    });
+    count += 1;
+  }
+  for (const v of local.versions) {
+    await service.saveVersion({
+      ...v, id: idMap.get(v.id)!, userId,
+      projectId: refReq(v.projectId),
+      repositoryId: ref(v.repositoryId),
+      deploymentIds: (v.deploymentIds ?? []).map((d) => refReq(d)),
+      primaryDeploymentId: ref(v.primaryDeploymentId),
+    });
+    count += 1;
+  }
+  for (const r of local.repositories) {
+    await service.saveRepository({
+      ...r, id: idMap.get(r.id)!, userId,
+      projectVersionId: ref(r.projectVersionId),
+    });
+    count += 1;
+  }
+  for (const d of local.deployments) {
+    await service.saveDeployment({
+      ...d, id: idMap.get(d.id)!, userId,
+      projectVersionId: ref(d.projectVersionId),
+    });
+    count += 1;
+  }
+  for (const t of local.tasks) {
+    await service.saveTask({
+      ...t, id: idMap.get(t.id)!, userId,
+      projectId: refReq(t.projectId),
+      projectVersionId: ref(t.projectVersionId),
+    });
+    count += 1;
+  }
+  for (const e of local.evaluations) {
+    await service.saveEvaluation({
+      ...e, id: idMap.get(e.id)!, userId,
+      projectId: refReq(e.projectId),
+      projectVersionId: refReq(e.projectVersionId),
+    });
+    count += 1;
+  }
+  for (const a of local.activity) {
+    await service.saveActivity({
+      ...a, id: idMap.get(a.id)!, userId,
+      projectId: ref(a.projectId),
+      projectVersionId: ref(a.projectVersionId),
+    });
+    count += 1;
+  }
+  for (const r of local.reports) {
+    await service.saveReport({ ...r, id: idMap.get(r.id)!, userId });
+    count += 1;
+  }
+  return count;
+};
 
 class DemoService implements DataService {
   readonly mode = 'demo' as const;
@@ -170,7 +333,7 @@ class DemoService implements DataService {
       return { ...buildSeed(), reports: [] };
     }
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(DEMO_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as SeedBundle & { reports?: Report[] };
         return { ...parsed, reports: parsed.reports ?? [] };
@@ -186,7 +349,7 @@ class DemoService implements DataService {
   private write(data: SeedBundle & { reports: Report[] }) {
     if (typeof window === 'undefined') return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(data));
     } catch {
       // Quota exceeded in private mode → keep in-memory only.
     }
@@ -209,7 +372,16 @@ class DemoService implements DataService {
   async saveTask(t: Task) { const d = this.read(); this.write({ ...d, tasks: this.merge(d.tasks, t) }); }
   async saveEvaluation(e: ModelEvaluation) { const d = this.read(); this.write({ ...d, evaluations: this.merge(d.evaluations, e) }); }
   async saveActivity(a: ActivityEntry) { const d = this.read(); this.write({ ...d, activity: [a, ...d.activity].slice(0, 200) }); }
-  async saveReport(r: Report) { const d = this.read(); this.write({ ...d, reports: [r, ...d.reports].slice(0, 60) }); }
+  async saveReport(r: Report) {
+    const d = this.read();
+    const exists = d.reports.some((x) => x.id === r.id);
+    this.write({
+      ...d,
+      reports: exists
+        ? d.reports.map((x) => (x.id === r.id ? r : x))
+        : [r, ...d.reports].slice(0, 60),
+    });
+  }
   async deleteProject(id: string) {
     const d = this.read();
     this.write({

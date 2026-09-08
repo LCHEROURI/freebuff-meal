@@ -24,6 +24,7 @@ export type HealthStatus = 'HEALTHY' | 'DEGRADED' | 'FAILED' | 'UNKNOWN' | 'NOT_
 export type TaskType = 'FEATURE' | 'BUG' | 'DEPLOYMENT' | 'EVALUATION' | 'REFACTOR' | 'OTHER';
 export type RepoProvider = 'github' | 'bitbucket' | 'gitlab' | 'other';
 export type DeploymentProvider =
+  | 'apphosting'
   | 'vercel'
   | 'firebase'
   | 'cloud_run'
@@ -49,7 +50,7 @@ export const TASK_TYPES: TaskType[] = [
   'FEATURE', 'BUG', 'DEPLOYMENT', 'EVALUATION', 'REFACTOR', 'OTHER',
 ];
 export const DEPLOYMENT_PROVIDERS: DeploymentProvider[] = [
-  'vercel', 'firebase', 'cloud_run', 'replit', 'netlify', 'railway', 'render',
+  'apphosting', 'vercel', 'firebase', 'cloud_run', 'replit', 'netlify', 'railway', 'render',
   'lovable', 'ai_studio', 'other',
 ];
 
@@ -60,7 +61,6 @@ export const DEPLOYMENT_PROVIDERS: DeploymentProvider[] = [
 export interface UserProfile {
   id: string;
   name: string;
-  email: string;
   timezone: string;
   dailyReportEnabled: boolean;
   dailyReportTime: string; // HH:mm
@@ -68,6 +68,9 @@ export interface UserProfile {
   weeklyReportDay: number; // 0-6 (0 = Sunday)
   weeklyReportTime: string;
   defaultStaleDays: number; // e.g. 7
+  /** Preferred OpenRouter model id for AI summaries (e.g. deepseek/deepseek-chat).
+   *  Empty means "use the OPENROUTER_MODEL env default". */
+  aiModel?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -91,6 +94,10 @@ export interface Project {
   nextActionDueDate?: string;
   blocker?: string;
   notes?: string;
+  /** Optional AI-drafted "why this version wins" recommendation (OpenRouter). */
+  winnerRecommendation?: string;
+  /** Model id that produced winnerRecommendation. */
+  winnerRecommendationModel?: string;
   archived: boolean;
   createdAt: string;
   updatedAt: string;
@@ -158,6 +165,7 @@ export interface Repository {
 
 export interface Deployment {
   id: string;
+  userId: string;
   projectVersionId?: string;
   provider: DeploymentProvider;
   projectName: string;
@@ -181,6 +189,7 @@ export interface Deployment {
 
 export interface Task {
   id: string;
+  userId: string;
   projectId: string;
   projectVersionId?: string;
   title: string;
@@ -202,6 +211,7 @@ export interface Task {
 
 export interface ModelEvaluation {
   id: string;
+  userId: string;
   projectId: string;
   projectVersionId: string;
   builder: string;
@@ -253,11 +263,28 @@ export interface ActivityEntry {
 export interface Report {
   id: string;
   userId: string;
-  kind: 'daily' | 'weekly';
+  kind: 'daily' | 'weekly' | 'monthly';
   title: string;
   body: string; // markdown-ish plain text
   attentionCount: number;
   createdAt: string;
+  /** Optional AI-written executive summary (OpenRouter). Absent when the AI
+   *  integration is unconfigured or the call failed — deterministic fallback. */
+  aiSummary?: string;
+  /** Model id that produced aiSummary (e.g. deepseek/deepseek-chat). */
+  aiModel?: string;
+}
+
+export interface Reminder {
+  id: string;
+  userId: string;
+  projectId?: string;
+  title: string;
+  note?: string;
+  remindAt: string; // ISO or YYYY-MM-DDTHH:mm
+  done: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ============================================================================
@@ -281,7 +308,6 @@ const timestamp = z.string().datetime({ offset: true }).or(z.string().min(10));
 export const UserProfileSchema = z.object({
   id: idString,
   name: z.string().min(1),
-  email: z.string().email(),
   timezone: z.string().default('America/Los_Angeles'),
   dailyReportEnabled: z.boolean(),
   dailyReportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
@@ -289,6 +315,7 @@ export const UserProfileSchema = z.object({
   weeklyReportDay: z.number().int().min(0).max(6),
   weeklyReportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   defaultStaleDays: z.number().int().min(1).max(90),
+  aiModel: z.string().max(120).optional(),
   createdAt: timestamp,
   updatedAt: timestamp,
 });
@@ -312,6 +339,8 @@ export const ProjectSchema = z.object({
   nextActionDueDate: z.string().optional(),
   blocker: z.string().optional(),
   notes: z.string().optional(),
+  winnerRecommendation: z.string().optional(),
+  winnerRecommendationModel: z.string().optional(),
   archived: z.boolean(),
   createdAt: timestamp,
   updatedAt: timestamp,
@@ -379,6 +408,7 @@ export const RepositorySchema = z.object({
 
 export const DeploymentSchema = z.object({
   id: idString,
+  userId: idString,
   projectVersionId: z.string().optional(),
   provider: DeploymentProviderSchema,
   projectName: z.string().min(1),
@@ -402,6 +432,7 @@ export const DeploymentSchema = z.object({
 
 export const TaskSchema = z.object({
   id: idString,
+  userId: idString,
   projectId: idString,
   projectVersionId: z.string().optional(),
   title: z.string().min(1),
@@ -423,6 +454,7 @@ export const TaskSchema = z.object({
 
 export const ModelEvaluationSchema = z.object({
   id: idString,
+  userId: idString,
   projectId: idString,
   projectVersionId: idString,
   builder: z.string(),
@@ -463,11 +495,25 @@ export const ActivityEntrySchema = z.object({
 export const ReportSchema = z.object({
   id: idString,
   userId: idString,
-  kind: z.enum(['daily', 'weekly']),
+  kind: z.enum(['daily', 'weekly', 'monthly']),
   title: z.string(),
   body: z.string(),
   attentionCount: z.number().int().min(0),
   createdAt: timestamp,
+  aiSummary: z.string().optional(),
+  aiModel: z.string().optional(),
+});
+
+export const ReminderSchema = z.object({
+  id: idString,
+  userId: idString,
+  projectId: z.string().optional(),
+  title: z.string().min(1),
+  note: z.string().optional(),
+  remindAt: z.string().min(4),
+  done: z.boolean(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
 });
 
 // ============================================================================

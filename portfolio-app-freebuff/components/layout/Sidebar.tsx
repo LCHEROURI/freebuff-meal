@@ -5,11 +5,13 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, FolderKanban, GitFork, CalendarClock, ListTodo, Rocket,
   GitBranch, Scale, FileText, History, Plug, Settings, X, Sun, Moon, Monitor,
-  Sparkles,
+  Sparkles, Images,
 } from 'lucide-react';
 
 import { useTheme } from '@/lib/theme';
+import { useAuth } from '@/lib/auth';
 import { isFirebaseConfigured } from '@/lib/firebase';
+import { ConnectionStatusWidget } from '@/components/layout/ConnectionStatusWidget';
 
 const NAV = [
   { href: '/command-center', label: 'Command Center', icon: LayoutDashboard },
@@ -23,6 +25,7 @@ const NAV = [
   { href: '/reports', label: 'Reports', icon: FileText },
   { href: '/activity', label: 'Activity', icon: History },
   { href: '/integrations', label: 'Integrations', icon: Plug },
+  { href: '/gallery', label: 'Gallery', icon: Images },
   { href: '/settings', label: 'Settings', icon: Settings },
 ] as const;
 
@@ -56,6 +59,7 @@ const ThemeToggle = () => {
 
 export const Sidebar = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
   const pathname = usePathname();
+  const { user, signOut } = useAuth();
 
   const isActive = (href: string) =>
     href === '/command-center' ? pathname === href : pathname.startsWith(href);
@@ -112,10 +116,20 @@ export const Sidebar = ({ open, onClose }: { open: boolean; onClose: () => void 
 
         <div className="space-y-3 border-t border-butter-200 px-4 py-4 dark:border-pepper-700">
           <ThemeToggle />
-          <div className="flex items-center gap-2 rounded-lg bg-butter-100 px-3 py-2 text-xs text-pepper-600 dark:bg-pepper-700 dark:text-pepper-200">
-            <span className={`h-2 w-2 shrink-0 rounded-full ${isFirebaseConfigured() ? 'bg-basil-500' : 'bg-turmeric-500'}`} />
-            {isFirebaseConfigured() ? 'Firebase connected' : 'Demo mode — local data'}
-          </div>
+          {/* onClose closes the mobile drawer when tapping through to Integrations */}
+          <ConnectionStatusWidget onClose={onClose} />
+          {isFirebaseConfigured() && (
+            <div className="flex items-center justify-between gap-2 rounded-lg bg-butter-100 px-3 py-2 text-xs text-pepper-600 dark:bg-pepper-700 dark:text-pepper-200">
+              <span className="truncate">{user?.email ?? user?.displayName ?? 'Signed in'}</span>
+              <button
+                type="button"
+                className="shrink-0 font-semibold text-tomato-600 hover:underline dark:text-tomato-400"
+                onClick={() => signOut()}
+              >
+                Sign out
+              </button>
+            </div>
+          )}
         </div>
       </aside>
     </>

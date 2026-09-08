@@ -1,39 +1,156 @@
 'use client';
 
+import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { CalendarClock, AlertCircle, TrendingUp, CheckCircle2, ChevronRight } from 'lucide-react';
+import {
+  CalendarClock, AlertCircle, TrendingUp, CheckCircle2, ChevronRight,
+  Plus, Bell, RotateCcw, Printer, FileCode,
+} from 'lucide-react';
 
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { PriorityBadge, StatusBadge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { TaskModal } from '@/components/tasks/TaskModal';
 import { useStore } from '@/lib/store';
 import { buildTopThree, isDueToday, isOverdue, timeAgo } from '@/lib/engine';
+import { briefingPrintMeta, type PrintDoc } from '@/lib/printDoc';
+import { downloadPrintHtml, usePrint } from '@/lib/usePrint';
+import type { Task, Reminder } from '@/types';
+
+// The print-only area mirrors the Top Three hero card: the ranked action list
+// with project context. Shares the .print-report recipe with the Command Center
+// and Reports page via the usePrint hook — print never touches the data layer.
+type PrintBriefing = {
+  actions: Array<{ priority: number; title: string; description: string; projectName?: string }>;
+};
+
+// Map the on-screen top three to the shared print-preview document: the ranked
+// actions become a numbered list with project + rank context. Today's Top Three
+// is rule-based (no AI narration on this page), so the doc carries no callouts.
+const buildPrintDoc = (payload: PrintBriefing): PrintDoc => ({
+  title: "Today's Top Three",
+  // Shared builder — the in-page .print-report fallback below calls the same
+  // function, so the two render paths can never drift.
+  meta: briefingPrintMeta(payload.actions.length),
+  list: payload.actions.map((action, i) => ({
+    number: i + 1,
+    title: action.title,
+    project: action.projectName,
+    detail: `${action.description} (rank ${action.priority})`,
+  })),
+});
+
+const uid = (prefix: string) =>
+  `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+const todayInput = () => {
+  const d = new Date();
+  const m = `${d.getMonth() + 1}`.padStart(2, '0');
+  const day = `${d.getDate()}`.padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+};
 
 export default function TodayPage() {
   const store = useStore();
   const topThree = buildTopThree(store);
+  // Shared print lifecycle for the Top Three hero card.
+  const { printTarget, printReport } = usePrint<PrintBriefing>(buildPrintDoc);
+
+  // The print payload mirrors what is on screen right now: the ranked actions
+  // with project names resolved for context.
+  const buildPrintBriefing = (): PrintBriefing => ({
+    actions: topThree.map((a) => ({
+      priority: a.priority,
+      title: a.title,
+      description: a.description,
+      projectName: a.projectId ? store.projects.find((p) => p.id === a.projectId)?.name : undefined,
+    })),
+  });
+
   const dueToday = store.tasks.filter((t) => t.status !== 'COMPLETED' && t.status !== 'CANCELED' && isDueToday(t.dueDate));
   const overdue = store.tasks.filter((t) => t.status !== 'COMPLETED' && t.status !== 'CANCELED' && isOverdue(t.dueDate));
-  const reminders = store.tasks.filter((t) => t.reminderDate && isDueToday(t.reminderDate) && t.status !== 'COMPLETED' && t.status !== 'CANCELED');
-  const recentlyDone = store.tasks
+  const recentDone = store.tasks
     .filter((t) => t.status === 'COMPLETED')
     .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
     .slice(0, 5);
 
+  const [quickTitle, setQuickTitle] = useState('');
+  const [editing, setEditing] = useState<Task | null>(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+
   const projectName = (id: string) => store.projects.find((p) => p.id === id)?.name ?? 'Unknown';
+  const fallbackProjectId = store.projects[0]?.id ?? 'p-unsorted';
+
+  // Reminders are task-derived (tasks with a reminder date set for today).
+  // There is no separate live reminder store anymore — the app's data layer is
+  // Firestore, and reminders persist through tasks.
+  const taskDerivedReminders = store.tasks.filter(
+    (t) => t.reminderDate && isDueToday(t.reminderDate) && t.status !== 'COMPLETED' && t.status !== 'CANCELED',
+  );
+  const reminders = taskDerivedReminders.map((t) => ({
+    id: `derived-${t.id}`, userId: store.userId, title: t.title, remindAt: t.reminderDate!, done: false,
+    projectId: t.projectId, createdAt: t.createdAt, updatedAt: t.updatedAt,
+  }) as Reminder);
+
+  const quickAdd = async (e: FormEvent) => {
+    e.preventDefault();
+    const title = quickTitle.trim();
+    if (!title) return;
+    const now = new Date().toISOString();
+    const task: Task = {
+      id: uid('t'), userId: store.userId, projectId: fallbackProjectId,
+      title, status: 'NEXT', priority: 'P2_MEDIUM', taskType: 'FEATURE',
+      dueDate: todayInput(), position: store.tasks.length, createdAt: now, updatedAt: now,
+    };
+    await store.saveTask(task);
+    setQuickTitle('');
+  };
+
+  const liveBadge = () => null;
 
   return (
     <div>
       <PageHeader
         title="Today"
         description={`${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })} — focus on what moves the needle.`}
+        action={liveBadge()}
       />
 
       {/* Top three hero */}
       <section aria-label="Today's top three" className="mb-6">
         <Card className="bg-gradient-warm dark:bg-pepper-800">
-          <CardHeader title="Today's Top Three" subtitle="Auto-computed from the priority queue and your due dates." action={<TrendingUp size={18} className="text-tomato-500" aria-hidden="true" />} />
+          <CardHeader
+            title="Today's Top Three"
+            subtitle="Auto-computed from the priority queue and your due dates."
+            action={
+              <div className="flex items-center gap-2">
+                {topThree.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-ghost text-xs"
+                    aria-label="Print today's top three"
+                    title="Print this briefing"
+                    onClick={() => printReport(buildPrintBriefing())}
+                  >
+                    <Printer size={14} aria-hidden="true" /> Print
+                  </button>
+                )}
+                {topThree.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-ghost text-xs"
+                    aria-label="Save today's top three as HTML"
+                    title="Save the standalone preview document as a shareable HTML file"
+                    onClick={() => downloadPrintHtml(buildPrintDoc(buildPrintBriefing()))}
+                  >
+                    <FileCode size={14} aria-hidden="true" /> Save as HTML
+                  </button>
+                )}
+                <TrendingUp size={18} className="text-tomato-500" aria-hidden="true" />
+              </div>
+            }
+          />
           {topThree.length === 0 ? (
             <p className="text-sm text-pepper-500 dark:text-pepper-300">Nothing urgent. Use the time for comparisons, roadmap, or rest. 🎉</p>
           ) : (
@@ -43,10 +160,21 @@ export default function TodayPage() {
                   <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-bold text-white ${i === 0 ? 'bg-paprika-500' : i === 1 ? 'bg-tomato-500' : 'bg-turmeric-500'}`}>
                     {i + 1}
                   </span>
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="font-semibold text-pepper-900 dark:text-flour-50">{action.title}</p>
                     <p className="text-sm text-pepper-500 dark:text-pepper-300">{action.description}</p>
                   </div>
+                  {action.taskId && (
+                    <button
+                      type="button"
+                      className="btn-ghost shrink-0 rounded-md p-1.5 text-basil-600 dark:text-basil-400"
+                      aria-label={`Complete ${action.title}`}
+                      title="Mark done"
+                      onClick={() => store.completeTask(action.taskId!)}
+                    >
+                      <CheckCircle2 size={17} aria-hidden="true" />
+                    </button>
+                  )}
                 </li>
               ))}
             </ol>
@@ -59,6 +187,19 @@ export default function TodayPage() {
         <section aria-label="Due today">
           <Card>
             <CardHeader title="Due today" subtitle={`${dueToday.length} task${dueToday.length === 1 ? '' : 's'}`} action={<CalendarClock size={18} className="text-turmeric-500" aria-hidden="true" />} />
+            <form onSubmit={quickAdd} className="mb-3 flex gap-2">
+              <input
+                type="text"
+                value={quickTitle}
+                onChange={(e) => setQuickTitle(e.target.value)}
+                placeholder="Quick-add a task due today…"
+                className="input-base"
+                aria-label="Quick-add task due today"
+              />
+              <button type="submit" className="btn-primary shrink-0 px-3" aria-label="Add task">
+                <Plus size={16} aria-hidden="true" />
+              </button>
+            </form>
             {dueToday.length === 0 ? (
               <p className="text-sm text-pepper-500 dark:text-pepper-300">Nothing due today.</p>
             ) : (
@@ -68,10 +209,10 @@ export default function TodayPage() {
                     <button type="button" className="text-basil-500 hover:text-basil-700" aria-label={`Complete ${t.title}`} onClick={() => store.completeTask(t.id)}>
                       <CheckCircle2 size={18} aria-hidden="true" />
                     </button>
-                    <div className="min-w-0 flex-1">
+                    <button type="button" className="min-w-0 flex-1 text-left" onClick={() => { setEditing(t); setEditModalOpen(true); }}>
                       <p className="truncate font-medium">{t.title}</p>
                       <p className="text-xs text-pepper-400">{projectName(t.projectId)}</p>
-                    </div>
+                    </button>
                     <PriorityBadge priority={t.priority} />
                   </li>
                 ))}
@@ -91,10 +232,13 @@ export default function TodayPage() {
                 {overdue.map((t) => (
                   <li key={t.id} className="rounded-xl2 border border-paprika-200 bg-paprika-50 p-3 dark:border-paprika-800 dark:bg-paprika-950/40">
                     <div className="flex items-center gap-2">
-                      <Link href={`/projects/${t.projectId}`} className="min-w-0 flex-1">
+                      <button type="button" className="shrink-0 text-basil-600 hover:text-basil-700 dark:text-basil-400" aria-label={`Complete ${t.title}`} onClick={() => store.completeTask(t.id)}>
+                        <CheckCircle2 size={17} aria-hidden="true" />
+                      </button>
+                      <button type="button" className="min-w-0 flex-1 text-left" onClick={() => { setEditing(t); setEditModalOpen(true); }}>
                         <p className="truncate font-medium text-paprika-700 dark:text-paprika-200">{t.title}</p>
                         <p className="text-xs text-paprika-500 dark:text-paprika-300">{projectName(t.projectId)} · due {new Date(t.dueDate!).toLocaleDateString()}</p>
-                      </Link>
+                      </button>
                       <StatusBadge status={t.status} />
                     </div>
                   </li>
@@ -107,15 +251,26 @@ export default function TodayPage() {
         {/* Reminders */}
         <section aria-label="Reminders">
           <Card>
-            <CardHeader title="Reminders" subtitle="Tasks with a reminder set for today." />
+            <CardHeader
+              title="Reminders"
+              subtitle="Tasks with a reminder set for today."
+              action={<Bell size={18} className="text-turmeric-500" aria-hidden="true" />}
+            />
             {reminders.length === 0 ? (
               <p className="text-sm text-pepper-500 dark:text-pepper-300">No reminders for today.</p>
             ) : (
               <ul className="space-y-2">
-                {reminders.map((t) => (
-                  <li key={t.id} className="flex items-center justify-between text-sm">
-                    <span className="font-medium">{t.title}</span>
-                    <Link href={`/projects/${t.projectId}`} className="text-pepper-400 hover:text-tomato-600"><ChevronRight size={16} aria-hidden="true" /></Link>
+                {reminders.map((r) => (
+                  <li key={r.id} className="flex items-center justify-between gap-2 rounded-xl2 border border-butter-200 p-2.5 text-sm dark:border-pepper-700">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-medium">{r.title}</span>
+                      <span className="shrink-0 text-xs text-pepper-400">{new Date(r.remindAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>
+                    </div>
+                    {r.projectId && (
+                      <Link href={`/projects/${r.projectId}`} className="shrink-0 text-pepper-400 hover:text-tomato-600">
+                        <ChevronRight size={15} aria-hidden="true" />
+                      </Link>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -127,15 +282,24 @@ export default function TodayPage() {
         <section aria-label="Recently completed">
           <Card>
             <CardHeader title="Recently completed" subtitle="Keep the momentum." />
-            {recentlyDone.length === 0 ? (
+            {recentDone.length === 0 ? (
               <EmptyState title="Nothing completed yet" description="Complete a task to see it here." />
             ) : (
               <ul className="space-y-2">
-                {recentlyDone.map((t) => (
+                {recentDone.map((t) => (
                   <li key={t.id} className="flex items-center gap-2 text-sm">
                     <CheckCircle2 size={15} className="shrink-0 text-basil-500" aria-hidden="true" />
                     <span className="flex-1 truncate font-medium">{t.title}</span>
                     <span className="shrink-0 text-xs text-pepper-400">{timeAgo(t.completedAt ?? '')}</span>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md p-1 text-pepper-300 hover:bg-butter-100 hover:text-pepper-600 dark:hover:bg-pepper-700"
+                      aria-label={`Reopen ${t.title}`}
+                      title="Reopen"
+                      onClick={() => store.saveTask({ ...t, status: 'BACKLOG', completedAt: undefined })}
+                    >
+                      <RotateCcw size={13} aria-hidden="true" />
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -143,6 +307,31 @@ export default function TodayPage() {
           </Card>
         </section>
       </div>
+
+      <TaskModal open={editModalOpen} onClose={() => setEditModalOpen(false)} editing={editing ?? undefined} projectId={editing?.projectId ?? fallbackProjectId} />
+
+      {/* Print-only area — visible ONLY in the print dialog (@media print in
+          globals.css hides everything else and anchors this to the top of the
+          page). Rendered only while a briefing is being printed, so it never
+          lingers in the on-screen DOM. */}
+      {printTarget && (
+        <div className="print-report" data-testid="print-report" aria-hidden="true">
+          <h2 className="print-report-title">Today&apos;s Top Three</h2>
+          <p className="print-report-meta">
+            {/* Same shared builder as the preview document — never inline a copy. */}
+            {briefingPrintMeta(printTarget.actions.length)}
+          </p>
+          <ol>
+            {printTarget.actions.map((action, i) => (
+              <li key={i}>
+                <strong>{i + 1}. {action.title}</strong>
+                {action.projectName && <span> · {action.projectName}</span>}
+                <p>{action.description} (rank {action.priority})</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { History } from 'lucide-react';
+import { History, MailWarning } from 'lucide-react';
 
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Card } from '@/components/ui/Card';
@@ -32,7 +32,12 @@ const KIND_TONES: Record<string, string> = {
 
 export default function ActivityPage() {
   const store = useStore();
-  const [filter, setFilter] = useState<'ALL' | string>('ALL');
+  const [filter, setFilter] = useState('ALL');
+
+  // When the Firestore activity feed isn't live (service account missing or
+  // the user is in local demo mode), the feed is local-only. Surface that
+  // instead of silently showing demo/partial activity.
+  const liveActivityOff = !store.activityLive;
 
   const kinds = Array.from(new Set(store.activity.map((a) => KIND_LABELS[a.kind] ?? a.kind))).sort();
   const entries = store.activity
@@ -45,6 +50,23 @@ export default function ActivityPage() {
         title="Activity"
         description="Every meaningful event across projects, versions, deployments, and scans."
       />
+
+      {liveActivityOff && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-turmeric-300 bg-turmeric-50 px-3 py-2 text-xs text-turmeric-800 dark:border-turmeric-800 dark:bg-turmeric-900/40 dark:text-turmeric-200" role="status">
+          <span className="inline-flex items-center gap-1.5">
+            <MailWarning size={14} aria-hidden="true" />
+            <strong>Live activity feed is not connected</strong>
+          </span>
+          <span className="text-turmeric-700 dark:text-turmeric-300">
+            Showing local-only events. Sign in to sync activity to your Firestore
+            account — the app&apos;s single data store, no separate database to
+            provision.{' '}
+            <Link href="/integrations" className="font-medium underline underline-offset-2 hover:text-tomato-600">
+              Integration setup
+            </Link>
+          </span>
+        </div>
+      )}
 
       <div className="mb-4 flex flex-wrap gap-1.5">
         <button type="button" className={filter === 'ALL' ? 'chip chip-active' : 'chip'} onClick={() => setFilter('ALL')}>All</button>

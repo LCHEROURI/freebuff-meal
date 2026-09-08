@@ -19,6 +19,8 @@ yarn-error.log*
 .env
 .env.local
 .env.*.local
+# generated build provenance (written by deploy script / e2e, never committed)
+.env.production
 
 # typescript
 *.tsbuildinfo
@@ -31,5 +33,15 @@ next-env.d.ts
 functions/lib
 functions/node_modules
 
-# local scan artifacts
+# local scan artifacts (parent app only — the car app has its own src/data)
 data/
+!freebuff-car-app/src/data/
+
+# Freebuff session artifacts (agent scratch space, not project files)
+.agents/
+.claude/
+skills-lock.json
+
+# Playwright artifacts (car-app E2E)
+freebuff-car-app/test-results/
+freebuff-car-app/playwright-report/
