@@ -118,10 +118,15 @@ export const MealPlanPage = () => {
         maxTotalTimeMinutes: profile.maxTotalTimeMinutes,
         dietaryPattern: profile.dietaryPattern,
         allergens: profile.allergens,
-        excludedIngredients: profile.excludedIngredients,
+        // `excludedIngredients` is now a free-text string (PR #47). The
+        // profile keeps its own `string[]` shape so Settings and the
+        // exported share snapshot stay list-shaped; we translate at the
+        // plan-boundary here so the parse matches the new schema.
+        excludedIngredients: (profile.excludedIngredients ?? []).join(', '),
         preferredCuisines: profile.favoriteCuisines,
         preferredProteins: profile.preferredProteins,
-        pantryIngredients: [],
+        pantryIngredients: '',
+        useSoonIngredients: '',
         availableEquipment: profile.availableEquipment,
         skillLevel: profile.skillLevel,
         budgetPreference: profile.budgetPreference,

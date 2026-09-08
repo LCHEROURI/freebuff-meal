@@ -16,7 +16,7 @@
  *   ▸ Voice input button on the inline add input mirrors the rest of the
  *     app's speech-first pattern.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 
 import { Chip } from '@/components/common/Chip';
@@ -82,31 +82,48 @@ export const CategoryChipTray = ({
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const selected = useMemo(
-    () => watch(selectedField) ?? [],
-    [selectedField, watch],
-  );
-  const customs = useMemo(
-    () => watch(customField) ?? [],
-    [customField, watch],
+  // Read `selected` and `customs` LIVE on every render and every click.
+  //
+  // Earlier this used `useMemo(() => watch(selectedField) ?? [], [watch])`.
+  // The memo never recomputed — RHF's `watch` reference is stable across
+  // parent renders, so the deps array stayed put, and the component kept
+  // holding the *initial* empty array. Click handlers closed over that
+  // stale snapshot, the `new Set(selected)` was always empty, and every
+  // toggle silently no-op'd.
+  //
+  // `watch(field)` is itself a per-field subscription primitive, so the
+  // extra inline reads on render are correct and cheap (RHF dedupes at
+  // the resolver layer).
+  const selected = watch(selectedField) ?? [];
+  const customs = watch(customField) ?? [];
+
+  const { available, droppedFromCustoms } = mergeWithDefaults(
+    defaults,
+    customs,
   );
 
-  const { available, droppedFromCustoms } = useMemo(
-    () => mergeWithDefaults(defaults, customs),
-    [defaults, customs],
-  );
-
-  // If a shipped default now shadows a user-saved custom (after a default
-  // list update), prune the loser from the form state on render.
+  // If a shipped default now shadows a user-saved custom (after a
+  // default-list update), prune the loser from the form state on render.
+  // We compare against a transient snapshot to avoid a feedback loop:
+  // the setValue below re-renders, customs updates, but the snapshot
+  // we filtered against stays the same, so the next render's checking
+  // is a no-op.
   useEffect(() => {
     if (droppedFromCustoms.length === 0) return;
-    const next = customs.filter((c) => !droppedFromCustoms.includes(c));
-    setValue(customField, next, { shouldDirty: true });
+    setValue(
+      customField,
+      customs.filter((c) => !droppedFromCustoms.includes(c)),
+      { shouldDirty: true },
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [droppedFromCustoms.length]);
 
   const toggle = (value: string) => {
-    const set = new Set(selected);
+    // Live read — guarantees the new Set reflects any pending state we
+    // haven't yet flushed through RHF (matters when the user clicks
+    // rapidly across two chips before the rerender lands).
+    const current = watch(selectedField) ?? [];
+    const set = new Set(current);
     if (set.has(value)) set.delete(value);
     else set.add(value);
     setValue(selectedField, Array.from(set), { shouldDirty: true });
@@ -118,21 +135,30 @@ export const CategoryChipTray = ({
       setError('Enter a name first.');
       return;
     }
-    if (!canAddCustom(customs)) {
+    const liveCustoms = watch(customField) ?? [];
+    const liveSelected = watch(selectedField) ?? [];
+    if (!canAddCustom(liveCustoms)) {
       setError('You have reached the custom-category limit.');
       return;
     }
-    if (isCategoryDuplicate(normalised, defaults, customs, selected)) {
-      const dup = findDuplicate(normalised, [...defaults, ...customs, ...selected]);
+    if (
+      isCategoryDuplicate(normalised, defaults, liveCustoms, liveSelected)
+    ) {
+      const dup = findDuplicate(
+        normalised,
+        [...defaults, ...liveCustoms, ...liveSelected],
+      );
       setError(`Already present${dup ? ` as “${dup}”.` : '.'}`);
       return;
     }
     setError(null);
     setDraft('');
-    const nextCustoms = [...customs, normalised];
-    setValue(customField, nextCustoms, { shouldDirty: true });
-    const nextSelected = Array.from(new Set([...selected, normalised]));
-    setValue(selectedField, nextSelected, { shouldDirty: true });
+    setValue(customField, [...liveCustoms, normalised], { shouldDirty: true });
+    setValue(
+      selectedField,
+      Array.from(new Set([...liveSelected, normalised])),
+      { shouldDirty: true },
+    );
     setAdding(false);
     toast.push({
       kind: 'success',
@@ -142,14 +168,16 @@ export const CategoryChipTray = ({
   };
 
   const removeCustom = (value: string) => {
+    const liveCustoms = watch(customField) ?? [];
+    const liveSelected = watch(selectedField) ?? [];
     setValue(
       customField,
-      customs.filter((c) => c !== value),
+      liveCustoms.filter((c) => c !== value),
       { shouldDirty: true },
     );
     setValue(
       selectedField,
-      selected.filter((s) => s !== value),
+      liveSelected.filter((s) => s !== value),
       { shouldDirty: true },
     );
   };

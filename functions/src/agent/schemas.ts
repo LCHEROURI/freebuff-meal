@@ -337,5 +337,75 @@ export const TOOL_NAMES = [
   'pause_cooking_session',
   'resume_cooking_session',
   'end_cooking_session',
+  'ask_chef', // CookVoiceOverlay conversational tip loop (PR #15).
+  'parse_timer_utterance', // CookVoiceOverlay timer-conversation loop (PR #22).
+  'add_pantry_items', // Ambient voice pantry intake (PR #43).
+  'list_pantry_items', // Read cooker's persisted pantry items.
+  'remove_pantry_item', // Explicit single-item removal.
+  'mark_pantry_items_used', // Bump usage counters when a plan consumes items (PR #43).
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
+
+/** ----------------------------------------------------------------
+ *  ask_chef — CookVoiceOverlay conversational tip loop
+ *  ---------------------------------------------------------------*/
+export const AskChefRequestSchema = z.object({
+  sessionId: z.string().min(1).max(80),
+  question: z.string().min(3).max(400),
+  /** Client-side normalized cache key. The server does NOT trust it
+   *  for anything other than logging — it re-normalizes for its
+   *  in-process cache. Gracefully degenerates to a non-cached call
+   *  when missing. */
+  cacheKey: z.string().min(1).max(120).optional(),
+  currentStepText: z.string().max(600).optional(),
+  currentStepPhase: z.enum(['preparation', 'cooking', 'presentation']).optional(),
+  currentStepNumber: z.number().int().positive().optional(),
+  recipeName: z.string().min(1).max(120).optional(),
+});
+export const AskChefResponseSchema = z.object({
+  answer: z.string().min(1).max(420),
+  source: z.enum(['fresh', 'cache']),
+  /** Free-form hint for the client (e.g. "consider start_timer" /
+   *  "consider substitute"). The UI surfaces it as a soft suggestion
+   *  chip — does NOT auto-trigger tool calls. */
+  followUp: z.string().nullable().default(null),
+});
+
+/** ----------------------------------------------------------------
+ *  parse_timer_utterance — CookVoiceOverlay timer-conversation loop
+ *  (PR #22).
+ *
+ *  Extends the existing 16 cooking-agent tools with a structured
+ *  timer-intent extractor. The overlay's PTT pipeline routes any
+ *  timer-shaped utterance through this callable instead of the
+ *  generic culinary-tip `ask_chef`. Same Firebase guard pattern
+ *  (enforceAppCheck + secret), same permissive session lookup (the
+ *  overlay uses synthetic `cookmode:` ids), same LRU shape.
+ *  ---------------------------------------------------------------*/
+export const ParseTimerUtteranceRequestSchema = z.object({
+  sessionId: z.string().min(1).max(80),
+  utterance: z.string().min(2).max(400),
+  /** Client-side normalized cache key. Server re-normalizes when
+   *  missing. Same shape as `ask_chef` cache key. */
+  cacheKey: z.string().min(1).max(120).optional(),
+  /** Optional hint from the cook's current step. Used only by the
+   *  LLM fallback when the utterance is implicit ("I'm putting it
+   *  in the oven now"). The server's already-handled regex path
+   *  ignores this. */
+  currentStepPhase: z.enum(['preparation', 'cooking', 'presentation']).optional(),
+});
+export const ParseTimerUtteranceResponseSchema = z.object({
+  action: z.enum(['start', 'none']),
+  durationSeconds: z.number().int().positive().max(60 * 60 * 4).nullable(),
+  /** Which pipeline resolved the utterance. 'regex' is the fast
+   *  client+server path and skips the LLM entirely; 'llm' was used
+   *  when the regex couldn't confidently match; 'fallback' means
+   *  both failed and the caller should fall back to its own logic. */
+  source: z.enum(['regex', 'llm', 'fallback']),
+  /** 0..1, the model's self-rated confidence. */
+  confidence: z.number().min(0).max(1),
+});
+export type ParseTimerUtteranceRequest = z.infer<typeof ParseTimerUtteranceRequestSchema>;
+export type ParseTimerUtteranceResponse = z.infer<typeof ParseTimerUtteranceResponseSchema>;
+export type AskChefRequest = z.infer<typeof AskChefRequestSchema>;
+export type AskChefResponse = z.infer<typeof AskChefResponseSchema>;

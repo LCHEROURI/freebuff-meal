@@ -25,6 +25,7 @@ import type {
   AgentIngredient,
   CookingSession,
   CookingSessionPhase,
+  PantryItem,
 } from './agentTypes';
 
 export type AgentRecipe = {
@@ -231,6 +232,95 @@ export const agentClient = {
     callTool<{ utterance: string }, { ingredients: AgentIngredient[]; warnings: string[] }>(
       'extractIngredientsFromSpeech',
       { utterance },
+    ),
+
+  /** CookVoiceOverlay conversational tip loop (PR #15).
+   *  Same shape in both modes — a deterministic cache key + per-mode
+   *  resolution (demo = hand-curated keyword dictionary; Firebase =
+   *  ask_chef onCall with server-side LRU). */
+  askChef: (args: {
+    sessionId: string;
+    question: string;
+    recipeName?: string;
+    currentStepText?: string;
+    currentStepPhase?: 'preparation' | 'cooking' | 'presentation';
+    currentStepNumber?: number;
+    cacheKey?: string;
+  }) =>
+    callTool<
+      typeof args,
+      {
+        answer: string;
+        source: 'fresh' | 'cache';
+        followUp: string | null;
+      }
+    >('askChef', args),
+
+  /** CookVoiceOverlay "start the timer" voice path (PR #22).
+   *  Extracts {action: 'start' | 'none', durationSeconds, source,
+   *  confidence} from a single push-to-talk utterance. Returns the
+   *  same shape in both modes; the demo path is regex-only and
+   *  skips the LLM entirely. */
+  parseTimerUtterance: (args: {
+    sessionId: string;
+    utterance: string;
+    currentStepPhase?: 'preparation' | 'cooking' | 'presentation';
+    cacheKey?: string;
+  }) =>
+    callTool<
+      typeof args,
+      {
+        action: 'start' | 'none';
+        durationSeconds: number | null;
+        source: 'regex' | 'llm' | 'fallback';
+        confidence: number;
+      }
+    >('parseTimerUtterance', args),
+
+  /** PR #43 — ambient voice pantry. Bulk-upsert a batch of items
+   *  (typically the result of `extractIngredientsFromSpeech`) into
+   *  the user's persistent pantry. Firebase path hits
+   *  `addPantryItems`; demo path is localStorage backed with the
+   *  same return shape. */
+  addPantryItems: (args: {
+    items: Array<{
+      name: string;
+      quantity: number | null;
+      unit: string | null;
+      condition: PantryItem['condition'];
+      confidence: number;
+      note?: string | null;
+    }>;
+    source?: 'voice' | 'manual';
+  }) =>
+    callTool<typeof args, {
+      items: PantryItem[];
+      savedAt: string;
+    }>('addPantryItems', args),
+
+  /** Server-side bulk read; the client mostly uses the `onSnapshot`
+   *  listener for live updates, but a one-shot read is useful when
+   *  migrating an unsigned-in session to a signed-in account. */
+  listPantryItems: (args?: { limit?: number }) =>
+    callTool<
+      { limit?: number } | undefined,
+      { items: PantryItem[]; fetchedAt: string }
+    >('listPantryItems', args),
+
+  /** Single-item removal (UI "remove this chip" path on PantryStrip). */
+  removePantryItem: (args: { itemId: string }) =>
+    callTool<typeof args, { itemId: string; removedAt: string }>(
+      'removePantryItem',
+      args,
+    ),
+
+  /** Called client-side after a successful plan save. Bumps
+   *  `timesUsed` + `lastUsedAt` on every pantry row whose
+   *  `normalizedName` matches one of the recipe's ingredient names. */
+  markPantryItemsUsed: (args: { ingredientNames: string[] }) =>
+    callTool<typeof args, { matched: number; touchedAt: string }>(
+      'markPantryItemsUsed',
+      args,
     ),
 };
 
@@ -585,6 +675,294 @@ const localDemoAgent = {
       warnings: ['Demo mode uses a heuristic — real extraction uses Gemini.'],
     };
   },
+
+  askChef: (args: {
+    sessionId: string;
+    question: string;
+    recipeName?: string;
+    currentStepText?: string;
+    currentStepPhase?: 'preparation' | 'cooking' | 'presentation';
+    currentStepNumber?: number;
+    cacheKey?: string;
+  }) => {
+    // Demo mode is O(1) pure and stateless: the keyword dictionary
+    // is consulted on every call. There's no LRU to look up against,
+    // so computing a synthetic cache key here would only add ceremony.
+    // The Firebase path uses the LRU; demo path skips it.
+    void args;
+    return {
+      answer: demoAskChefLookup(args.question, args.currentStepText),
+      source: 'fresh' as const,
+      followUp: null,
+    };
+  },
+
+  parseTimerUtterance: (args: {
+    sessionId: string;
+    utterance: string;
+    currentStepPhase?: 'preparation' | 'cooking' | 'presentation';
+    cacheKey?: string;
+  }) => {
+    // Demo mode runs the same regex-only timer parser the live
+    // CookVoiceOverlay does on the client. The full LLM path is
+    // skipped because there's no Firebase in demo mode.
+    void args;
+    return demoParseTimerUtterance(args.utterance);
+  },
+
+  // PR #43 — localStorage-backed pantry. Identical shape to the
+  // Firebase path so the strip + mic button work identically in
+  // demo mode. `storage` events keep cross-tab demo session in
+  // sync, mirroring what a real Firestore listener would do.
+  addPantryItems: (args: {
+    items: Array<{
+      name: string;
+      quantity: number | null;
+      unit: string | null;
+      condition: PantryItem['condition'];
+      confidence: number;
+      note?: string | null;
+    }>;
+    source?: 'voice' | 'manual';
+  }) => {
+    const uid = 'demo-user';
+    const savedAt = nowIso();
+    const existing = readDemoPantry(uid);
+    const out: PantryItem[] = [];
+    for (const partial of args.items) {
+      const normalizedName = normalizePantryNameLocal(partial.name);
+      const dedupeHit = existing.find(
+        (p) =>
+          p.normalizedName === normalizedName &&
+          p.condition === partial.condition,
+      );
+      if (dedupeHit) {
+        const updated: PantryItem = {
+          ...dedupeHit,
+          name: partial.name,
+          quantity: partial.quantity ?? dedupeHit.quantity,
+          unit: partial.unit ?? dedupeHit.unit,
+          confidence: Math.max(partial.confidence, dedupeHit.confidence),
+          note: partial.note ?? dedupeHit.note,
+        };
+        out.push(updated);
+        existing[existing.indexOf(dedupeHit)] = updated;
+        continue;
+      }
+      const fresh: PantryItem = {
+        id: `pantry_${Math.random().toString(36).slice(2, 10)}`,
+        ownerId: uid,
+        name: partial.name,
+        normalizedName,
+        quantity: partial.quantity,
+        unit: partial.unit,
+        condition: partial.condition,
+        source: args.source ?? 'voice',
+        confidence: partial.confidence,
+        addedAt: savedAt,
+        lastUsedAt: null,
+        timesUsed: 0,
+        note: partial.note ?? null,
+      };
+      out.push(fresh);
+      existing.unshift(fresh);
+    }
+    writeDemoPantry(uid, existing);
+    return { items: out, savedAt };
+  },
+
+  listPantryItems: (args?: { limit?: number }) => {
+    const uid = 'demo-user';
+    const items = readDemoPantry(uid).slice(0, args?.limit ?? 50);
+    return { items, fetchedAt: nowIso() };
+  },
+
+  removePantryItem: (args: { itemId: string }) => {
+    const uid = 'demo-user';
+    const existing = readDemoPantry(uid);
+    const next = existing.filter((p) => p.id !== args.itemId);
+    writeDemoPantry(uid, next);
+    return { itemId: args.itemId, removedAt: nowIso() };
+  },
+
+  markPantryItemsUsed: (args: { ingredientNames: string[] }) => {
+    const uid = 'demo-user';
+    const existing = readDemoPantry(uid);
+    const normalized = args.ingredientNames
+      .map((n) => n.toLowerCase().trim())
+      .filter(Boolean);
+    let matched = 0;
+    const now = nowIso();
+    const next = existing.map((p) => {
+      const hit = normalized.some(
+        (n) =>
+          p.normalizedName === n ||
+          p.normalizedName.includes(n) ||
+          n.includes(p.normalizedName),
+      );
+      if (!hit) return p;
+      matched += 1;
+      return { ...p, timesUsed: p.timesUsed + 1, lastUsedAt: now };
+    });
+    writeDemoPantry(uid, next);
+    return { matched, touchedAt: now };
+  },
+};
+
+/**
+ * Tiny demo-mode keyword → answer dictionary. Each entry is a small
+ * set of cue phrases keyed on a single canned reply. The lookup is
+ * intentionally cheap: pure substring match against the lowercased
+ * utterance. The cook in demo mode gets a sensible, non-robotic
+ * answer; in production, this path is bypassed by the real Gemini
+ * call inside the ask_chef onCall.
+ *
+ * Listed in order — earlier entries win on tie, which is why safety
+ * cues (doneness for chicken, beef, pork) appear before generic
+ * substitution / "how do I" cues.
+ */
+const DEMO_ASK_CHEF_ENTRIES: ReadonlyArray<{
+  cues: ReadonlyArray<string>;
+  reply: string;
+}> = [
+  {
+    cues: ['chicken', 'done', 'internal', 'temperature'],
+    reply: 'Cook the chicken to 165°F internal temperature. The juices should run clear, not pink.',
+  },
+  {
+    cues: ['beef', 'steak', 'medium'],
+    reply: 'For medium beef, aim for 145°F internal. Let it rest for 5 minutes before slicing.',
+  },
+  {
+    cues: ['pork', 'done'],
+    reply: 'Pork is safe at 145°F internal with a 3-min rest. It can stay a little pink in the middle.',
+  },
+  {
+    cues: ['fish', 'flake'],
+    reply: 'Fish is done when it flakes easily with a fork and reads 145°F internal.',
+  },
+  {
+    cues: ['substitute', 'lemon'],
+    reply: 'Try 1 to 2 teaspoons of lime juice plus a pinch of sugar. Or use apple cider vinegar in a smaller amount.',
+  },
+  {
+    cues: ['substitute', 'garlic'],
+    reply: 'Use 1/8 teaspoon garlic powder per clove called for, or a small pinch of granulated garlic.',
+  },
+  {
+    cues: ['substitute', 'butter'],
+    reply: 'Use the same amount of olive oil, or for baking try coconut oil at a 1 to 1 ratio.',
+  },
+  {
+    cues: ['substitute', 'parsley'],
+    reply: 'Try equal amounts of fresh cilantro, chives, or a teaspoon of dried parsley.',
+  },
+  {
+    cues: ['substitute', 'soy sauce'],
+    reply: 'Use tamari (gluten-free) or coconut aminos at a 1 to 1 ratio. Add a touch more salt if needed.',
+  },
+  {
+    cues: ['substitute', 'wine'],
+    reply: 'Use the same amount of chicken or vegetable broth plus a teaspoon of lemon juice or vinegar.',
+  },
+  {
+    cues: ['thick', 'sauce'],
+    reply: 'Whisk a teaspoon of cornstarch with 2 teaspoons of cold water, then stir in and simmer 1 minute.',
+  },
+  {
+    cues: ['salty', 'too salty'],
+    reply: 'Add a splash of acid (lemon or vinegar) and a small potato piece; remove the potato after 10 minutes.',
+  },
+  {
+    cues: ['spicy', 'too spicy'],
+    reply: 'Add a spoonful of dairy — yogurt, sour cream, or coconut milk — plus a pinch of sugar.',
+  },
+];
+
+const demoAskChefLookup = (
+  question: string,
+  stepText: string | undefined,
+): string => {
+  const text = ` ${question.toLowerCase()} `;
+  for (const entry of DEMO_ASK_CHEF_ENTRIES) {
+    if (entry.cues.every((cue) => text.includes(cue))) return entry.reply;
+  }
+  // Generic fallback that quotes the current step so the cook never
+  // hears a void. Better than silence.
+  if (stepText) {
+    return `I see you're following: ${stepText.slice(0, 80)}. Take it one step at a time.`;
+  }
+  return "I'm in demo mode right now — the full sous-chef needs a Firebase project to answer that.";
+};
+
+// Demo-mode timer parser. Mirrors the server-side regex-and-words
+// logic in `serverParseTimerRegex` so demo users see the same fast
+// answer shape (`{action: 'start'|'none', durationSeconds, source:
+// 'regex'}`). LLM fallback is intentionally out of scope for demo
+// mode — Firebase would be required to hit Gemini.
+const TIMER_NUM_WORD_TABLE: Readonly<Record<string, number>> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+  eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13,
+  fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+  nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60,
+  seventy: 70, eighty: 80, ninety: 90,
+};
+
+const demoParseTimerUtterance = (
+  utterance: string,
+): {
+  action: 'start' | 'none';
+  durationSeconds: number | null;
+  source: 'regex' | 'fallback';
+  confidence: number;
+} => {
+  const text = utterance.toLowerCase();
+  if (/\bquarter\s+hour\b|\ba\s+quarter\s+hour\b/.test(text)) {
+    return { action: 'start', durationSeconds: 900, source: 'regex', confidence: 0.95 };
+  }
+  if (/\bhalf\s+hour\b|\ba\s+half\s+hour\b/.test(text)) {
+    return { action: 'start', durationSeconds: 1800, source: 'regex', confidence: 0.95 };
+  }
+  const numeric = text.match(
+    /\b(\d+(?:\.\d+)?)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)\b/,
+  );
+  if (numeric) {
+    const n = Number(numeric[1]!);
+    const u = numeric[2]!.toLowerCase();
+    const unit: 's' | 'm' | 'h' = u.startsWith('s') || u === 's' ? 's' : u.startsWith('h') || u === 'h' ? 'h' : 'm';
+    const seconds = unit === 's' ? n : unit === 'm' ? n * 60 : n * 3600;
+    return {
+      action: 'start',
+      durationSeconds: Math.min(60 * 60 * 4, Math.max(1, Math.round(seconds))),
+      source: 'regex',
+      confidence: 0.95,
+    };
+  }
+  for (const [word, value] of Object.entries(TIMER_NUM_WORD_TABLE)) {
+    const re = new RegExp(`\\b${word}\\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)\\b`);
+    const m = text.match(re);
+    if (m) {
+      const u = m[1]!.toLowerCase();
+      const unit: 's' | 'm' | 'h' = u.startsWith('s') || u === 's' ? 's' : u.startsWith('h') || u === 'h' ? 'h' : 'm';
+      const seconds = unit === 's' ? value : unit === 'm' ? value * 60 : value * 3600;
+      return {
+        action: 'start',
+        durationSeconds: Math.min(60 * 60 * 4, Math.max(1, Math.round(seconds))),
+        source: 'regex',
+        confidence: 0.9,
+      };
+    }
+  }
+  if (/\ban?\s+hours?\b|\ban?\s+hour\b/.test(text)) {
+    return { action: 'start', durationSeconds: 3600, source: 'regex', confidence: 0.85 };
+  }
+  if (/\ban?\s+minutes?\b|\ban?\s+minute\b/.test(text)) {
+    return { action: 'start', durationSeconds: 60, source: 'regex', confidence: 0.85 };
+  }
+  if (/\ban?\s+seconds?\b|\ban?\s+second\b/.test(text)) {
+    return { action: 'start', durationSeconds: 1, source: 'regex', confidence: 0.85 };
+  }
+  return { action: 'none', durationSeconds: null, source: 'fallback', confidence: 0 };
 };
 
 const flattenStep = (recipe: AgentRecipe, idx: number): StepView => {
@@ -683,3 +1061,39 @@ const heuristicExtract = (utterance: string): AgentIngredient[] => {
   }
   return out;
 };
+
+// PR #43 — localStorage bridge for the pantry. Used by the demo
+// agent only; the Firebase path uses the real Firestore listener.
+// `localDemoAgent.listPantryItems` reads from a per-uid key so the
+// demo user has the same multi-user isolation contract as Firebase.
+const pantryKey = (uid: string): string => `freebuff:pantry:${uid}`;
+const readDemoPantry = (uid: string): PantryItem[] => {
+  try {
+    const raw = window.localStorage.getItem(pantryKey(uid));
+    if (!raw) return [];
+    return JSON.parse(raw) as PantryItem[];
+  } catch {
+    return [];
+  }
+};
+const writeDemoPantry = (uid: string, items: PantryItem[]): void => {
+  try {
+    window.localStorage.setItem(pantryKey(uid), JSON.stringify(items));
+    // Cross-tab sync: a sibling tab listening on `storage` will
+    // pick this up just like a Firestore onSnapshot would.
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: pantryKey(uid),
+        newValue: JSON.stringify(items),
+      }),
+    );
+  } catch {
+    // localStorage quota or disabled — best-effort.
+  }
+};
+const normalizePantryNameLocal = (raw: string): string =>
+  raw
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();

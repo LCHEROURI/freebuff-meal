@@ -32,6 +32,12 @@ import {
   resumeCookingSession,
   endCookingSession,
   extractIngredientsFromSpeech,
+  askChef,
+  parseTimerUtterance,
+  addPantryItems,
+  listPantryItems,
+  removePantryItem,
+  markPantryItemsUsed,
 } from './agent/index.js';
 
 export const ai = genkit({
@@ -61,4 +67,10 @@ export {
   resumeCookingSession,
   endCookingSession,
   extractIngredientsFromSpeech,
+  askChef,
+  parseTimerUtterance,
+  addPantryItems,
+  listPantryItems,
+  removePantryItem,
+  markPantryItemsUsed,
 };

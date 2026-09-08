@@ -785,11 +785,29 @@ const matchesProtein = (
   return list.some((p) => haystack.includes(p.toLowerCase()));
 };
 
+const excludedList = (
+  excluded: string | readonly string[] | undefined,
+): string[] => {
+  if (!excluded) return [];
+  // The `excludedIngredients` schema field is now a free-text string
+  // (PR #47). Use `typeof === 'string'` for narrowing rather than
+  // `Array.isArray` because the union includes `readonly string[]`
+  // and `Array.isArray` widening to `any[]` doesn't help the next
+  // branch narrow back to `string`.
+  if (typeof excluded === 'string') {
+    return excluded
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return [...excluded];
+};
+
 const excludedDish = (
   recipe: Recipe,
-  excluded: readonly string[] | undefined,
+  excluded: string | readonly string[] | undefined,
 ): boolean => {
-  const list = excluded ?? [];
+  const list = excludedList(excluded);
   return (
     list.length === 0 ||
     !recipe.ingredients.some((i) =>

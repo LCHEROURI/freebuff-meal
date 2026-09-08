@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Mic, MicOff } from 'lucide-react';
 
 import { useToast } from '@/components/common/Toast';
+import { joinVoiceDictation } from '@/lib/joinVoiceDictation';
+import { createVoiceCommitTimer } from '@/lib/voiceCommitTimer';
 
 /**
  * Browser-native voice input for any adjacent <input> or <textarea>.
@@ -75,6 +77,12 @@ export const VoiceInputButton = ({
   // so the strict-mode `useEffect` cleanup can `abort()` it without the
   // `InstanceType<X>` gymnastics that would force `X` to be a class.
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  // `commitTimerRef.current` is a `VoiceCommitTimer` instance that
+  // timeboxes continuous dictation so a natural mid-thought pause no
+  // longer triggers two appends (PR #48). Created lazily inside
+  // `start()` and reused across button-click cycles so the latest
+  // audio-text state survives a stop+start round trip.
+  const commitTimerRef = useRef<ReturnType<typeof createVoiceCommitTimer> | null>(null);
 
   const [supported, setSupported] = useState<boolean>(true);
   const [listening, setListening] = useState<boolean>(false);
@@ -110,9 +118,34 @@ export const VoiceInputButton = ({
     const host = findHost();
     if (!host) return;
     const isTextarea = host.tagName.toLowerCase() === 'textarea';
-    const newValue = isTextarea
-      ? (host.value ? `${host.value} ${value}` : value).trim()
-      : value;
+    /**
+     * Field opted in to additive voice input via `data-voice-separator`
+     * — append the dictated value with the configured separator so
+     * successive utterances don't replace prior content. Used by
+     * comma-separated list fields (Pantry ingredients, Use-soon,
+     * Excluded) where every voice input is *another* item rather
+     * than a full replacement of the field.
+     *
+     * Joining logic is delegated to `joinVoiceDictation` in
+     * `src/lib/joinVoiceDictation.ts` so the seven edge cases
+     * (empty prior, trailing comma, trailing whitespace, trailing
+     * sentence-period, mixed separators, multi-segment continuation,
+     * separator with whitespace) are independently tested rather
+     * than buried inside a DOM-bound callback.
+     *
+     * Default behavior (no opt-in) is preserved: textareas append
+     * with a single space (prose dictation); single-line inputs
+     * replace entirely (contact details, names, etc.).
+     */
+    const sep = host.dataset.voiceSeparator;
+    let newValue: string;
+    if (sep !== undefined) {
+      newValue = joinVoiceDictation(host.value, value, sep);
+    } else if (isTextarea) {
+      newValue = host.value ? `${host.value} ${value}` : value.trim();
+    } else {
+      newValue = value;
+    }
     const proto = isTextarea ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
     setter?.call(host, newValue);
@@ -126,6 +159,10 @@ export const VoiceInputButton = ({
   const listeningRef = useRef(false);
 
   const stop = useCallback(() => {
+    // Commit any pending text the user has finished speaking before
+    // tearing down the recognition handle. Without this, the user
+    // would tap the mic to stop and the trailing words would vanish.
+    commitTimerRef.current?.commit();
     const r = recognitionRef.current;
     if (!r) {
       setListening(false);
@@ -148,6 +185,22 @@ export const VoiceInputButton = ({
     listeningRef.current = listening;
   }, [listening]);
 
+  /**
+   * Binder for `commitTimerRef.current`'s `onCommit`. Runs once per
+   * commit-after-silence burst — pushes the trimmed text into the
+   * host field and announces the character count to the screen
+   * reader's `aria-live` region. Pulled out so the timer can be
+   * created lazily (and reused across button-click cycles) inside
+   * `start()` below.
+   */
+  const armCommitText = useCallback(
+    (text: string) => {
+      setHostValue(text);
+      setSrAnnouncement(`Voice input inserted ${text.length} characters.`);
+    },
+    [setHostValue],
+  );
+
   const start = useCallback(() => {
     if (!supported) return;
     const Ctor = SR();
@@ -158,26 +211,43 @@ export const VoiceInputButton = ({
     r.interimResults = true;
     r.maxAlternatives = 1;
 
+    // Lazily create the commit-after-silence timebox. Reused across
+    // stop+start cycles; `cancel()` discards any leftover state from
+    // a previous session so old audio-text doesn't leak into a fresh
+    // one. 1500 ms is the natural-pause detection threshold: shorter
+    // (≤ ~700 ms) for mid-thought pauses within a single utterance,
+    // longer for end-of-thought / end-of-list silences that should
+    // flush the field.
+    if (!commitTimerRef.current) {
+      commitTimerRef.current = createVoiceCommitTimer({
+        silenceMs: 1500,
+        onCommit: armCommitText,
+      });
+    } else {
+      commitTimerRef.current.cancel();
+    }
+
     r.onstart = () => {
       setListening(true);
       setSrAnnouncement('Voice input active. Speak now.');
     };
 
     r.onresult = (ev) => {
+      // Accumulate the current best-guess transcript. Both interim
+      // and final fragments feed the same tracked text — the timer
+      // re-arms with the latest string on every result, so a natural
+      // mid-thought pause (< 1500 ms) is absorbed and the full
+      // utterance commits as one append when the chef falls silent.
       let finalText = '';
+      let interimText = '';
       for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
         const result = ev.results[i];
         const alt = result[0]?.transcript ?? '';
         if (result.isFinal) finalText += alt;
+        else interimText += alt;
       }
-      if (finalText.trim()) {
-        setHostValue(finalText.trim());
-        // Announce ONLY when a real utterance commits. The final text
-        // also lands in the input itself, where the SR will read it via
-        // the standard input-value-change behavior — this announcement
-        // is the explicit user-feedback gesture.
-        setSrAnnouncement(`Voice input inserted ${finalText.trim().length} characters.`);
-      }
+      const next = (finalText || interimText).trim();
+      if (next) commitTimerRef.current?.arm(next);
     };
 
     r.onerror = (ev) => {
@@ -199,9 +269,12 @@ export const VoiceInputButton = ({
     };
 
     r.onend = () => {
-      // Only announce "stopped" if we transitioned to listening and back,
-      // not for the no-op case (e.g. mic denied before any onstart).
+      // Flush any pending text before the engine-side close. The chef
+      // could be mid-utterance when the engine auto-ends (e.g. silence
+      // detection window on some implementations); without this call,
+      // the trailing words would vanish.
       if (listeningRef.current) {
+        commitTimerRef.current?.commit();
         setSrAnnouncement('Voice input stopped.');
       }
       recognitionRef.current = null;
@@ -222,11 +295,19 @@ export const VoiceInputButton = ({
       recognitionRef.current = null;
       setListening(false);
     }
-  }, [supported, lang, continuous, setHostValue, stop, toast]);
+  }, [supported, lang, continuous, armCommitText, stop, toast]);
 
   // React 18 strict-mode: effects run twice in dev. The cleanup ensures
-  // we never leave a live `recognition` after unmount.
-  useEffect(() => () => stop(), [stop]);
+  // we never leave a live `recognition` after unmount, and also cancels
+  // any pending commit timer so the strict-mode dev-mode unmount cycle
+  // doesn't fire a stale `onCommit` against an unmounted React tree.
+  useEffect(
+    () => () => {
+      commitTimerRef.current?.cancel();
+      stop();
+    },
+    [stop],
+  );
 
   const onClick = () => {
     if (listening) stop();

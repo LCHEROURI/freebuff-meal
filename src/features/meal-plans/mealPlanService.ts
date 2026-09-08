@@ -114,11 +114,17 @@ export const regenerateRecipe = async (
       maxTotalTimeMinutes: profile.maxTotalTimeMinutes,
       dietaryPattern: 'none',
       allergens: profile.allergens as never,
-      excludedIngredients: profile.excludedIngredients,
+      // `excludedIngredients` is now a free-text string (PR #47). The
+      // profile keeps its own `string[]` shape; we translate at the
+      // call boundary so the demo-mode fallbackPlan input matches the
+      // new schema. The fallbackPlan helper itself comma-splits the
+      // string back into a list internally so the deterministic filter
+      // (`excludedDish`) keeps matching individual exclusions.
+      excludedIngredients: (profile.excludedIngredients ?? []).join(', '),
       preferredCuisines: profile.preferredCuisines,
       preferredProteins: profile.preferredProteins,
-      pantryIngredients: [],
-      useSoonIngredients: [],
+      pantryIngredients: '',
+      useSoonIngredients: '',
       availableEquipment: ['Stovetop', 'Oven'],
       skillLevel: 'intermediate',
       budgetPreference: 'everyday',
@@ -173,5 +179,21 @@ export const usePlanService = () => {
         excludedIngredients: string[];
       },
     ) => regenerateRecipe(planId, recipeId, reason, detail, lockList, profile),
+    /**
+     * PR #43 — async best-effort bump of pantry usage counters
+     * after a successful plan generation. Resolves locally even
+     * when the network call fails so the cook never sees a
+     * blocked "save" because the pantry write missed.
+     */
+    markPantryItemsUsed: async (ingredientNames: string[]) => {
+      try {
+        if (ingredientNames.length === 0) return { matched: 0 };
+        const mod = await import('@/features/agent/agentClient');
+        return await mod.agentClient.markPantryItemsUsed({ ingredientNames });
+      } catch (err) {
+        void err; // swallowed: best-effort, never block plan generation
+        return { matched: 0 };
+      }
+    },
   };
 };

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { plansStore, type DemoMealPlan } from '@/utils/demoAdapter';
 import { useAuth } from '@/features/auth/authContext';
+import { ensureProfile } from '@/utils/demoAdapter';
 import { AuthenticityBadge, DietaryBadge, AllergenBadge, Pill } from '@/components/common/AllergenBadge';
 import { Button } from '@/components/common/Button';
 import { useToast } from '@/components/common/Toast';
@@ -12,6 +13,8 @@ import type { EmbeddedRecipe } from '@/schemas/mealPlan';
 import type { Ingredient } from '@/schemas/ingredient';
 import { SwapIngredientDialog } from './SwapIngredientDialog';
 import type { SubstitutionCandidate } from './substitutionService';
+import { PantryMicButton } from '@/features/agent/PantryMicButton';
+import { PantryStrip } from '@/features/agent/PantryStrip';
 
 export const RecipeDetailPage = () => {
   const { recipeId, planId } = useParams<{ recipeId: string; planId: string }>();
@@ -20,7 +23,8 @@ export const RecipeDetailPage = () => {
   const [plan, setPlan] = useState<DemoMealPlan | null>(null);
   const [recipe, setRecipe] = useState<EmbeddedRecipe | null>(null);
   const [swapTarget, setSwapTarget] = useState<Ingredient | null>(null);
-
+  const profile = user ? ensureProfile(user.uid) : null;
+  const pantryVoiceEnabled = profile?.pantryVoiceEnabled ?? false;
   useEffect(() => {
     if (!user || !planId) return;
     const found = plansStore.list(user.uid).find((p) => p.id === planId);
@@ -148,6 +152,20 @@ export const RecipeDetailPage = () => {
           Start cooking
         </Link>
       </div>
+
+      {/* PR #43 — ambient voice pantry (RecipeDetailPage mount).
+          Pulls the user's existing pantry items as a chip strip and
+          mounts the mic button for new entries. Surfaced for any user
+          who opted in via Settings, so we don't make the button
+          accidentally-on for casual recipe browsers. */}
+      {pantryVoiceEnabled && (
+        <div className="mt-4 rounded-lg border border-butter-300 bg-butter-50 p-3">
+          <PantryMicButton uid={user?.uid ?? null} /* same add() exposed via hook */ />
+          <div className="mt-3">
+            <PantryStrip uid={user?.uid ?? null} />
+          </div>
+        </div>
+      )}
 
       <section className="mt-6 grid gap-4 md:grid-cols-2">
         <Card title="Equipment">
