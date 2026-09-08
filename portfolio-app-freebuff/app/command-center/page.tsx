@@ -277,7 +277,6 @@ export default function CommandCenterPage() {
       // Malformed or unreadable storage is ignored; the next generation
       // overwrites it.
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topThreeSignature]);
 
   // Depends on the signature, not []: the store hydrates asynchronously, so the

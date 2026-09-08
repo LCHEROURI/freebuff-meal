@@ -483,7 +483,6 @@ function ConnectionStatusPanel() {
       // Only restore the one wrapper this page installed.
       if (window.fetch === wrapped) window.fetch = origFetch;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [simulationEnabled]);
 
   const toggleSimulation = () => {

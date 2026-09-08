@@ -36,7 +36,6 @@ export default function RepositoriesPage() {
     setHighlightedRepo(target);
     const t = setTimeout(() => setHighlightedRepo(null), 2500);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoSignature]);
 
   const versionLabel = (id?: string) => {

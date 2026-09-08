@@ -44,7 +44,6 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     setThemeState(initial);
     applyTheme(initial);
     setResolvedTheme(initial === 'system' ? getSystemTheme() : initial);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
