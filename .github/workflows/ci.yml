@@ -28,27 +28,3 @@ jobs:
         run: npm run build
       - name: Unit tests
         run: npm test
-  deploy-preview:
-    needs: frontend
-    # The Firebase Hosting preview-channel job only runs when the
-    # FIREBASE_SERVICE_ACCOUNT secret is configured in the repo.
-    # Our active deploy target is Vercel (see vercel.json + README), so
-    # unconfigured Firebase previews should NOT block the PR gate.
-    # `continue-on-error: true` lets the job run (and surface useful info
-    # when the secret IS present), but a missing secret won't fail CI.
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - run: npm ci
-      - run: npm ci --prefix functions
-      - uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          channelId: preview-${{ github.event.pull_request.number }}
-          expires: 7d
